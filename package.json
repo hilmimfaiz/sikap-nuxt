@@ -9,6 +9,9 @@
     "preview": "nuxt preview",
     "postinstall": "prisma generate"
   },
+  "prisma": {
+    "seed": "ts-node prisma/seed.ts"
+  },
   "dependencies": {
     "@nuxtjs/color-mode": "^4.0.0",
     "@nuxtjs/i18n": "^10.2.1",
@@ -17,6 +20,7 @@
     "@types/nodemailer": "^7.0.4",
     "bcrypt": "^6.0.0",
     "chart.js": "^4.5.1",
+    "cloudinary": "^2.8.0",
     "nodemailer": "^7.0.11",
     "nuxt": "^4.2.1",
     "pinia": "^3.0.4",
@@ -27,6 +31,8 @@
   "devDependencies": {
     "@nuxtjs/tailwindcss": "^6.14.0",
     "@types/bcrypt": "^6.0.0",
-    "prisma": "^6.19.0"
+    "prisma": "^6.19.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
   }
 }
