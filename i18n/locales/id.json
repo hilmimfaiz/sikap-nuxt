@@ -1,0 +1,350 @@
+{
+  "app_name": "SIKAP APP",
+  "common": {
+    "add": "Tambah",
+    "edit": "Edit",
+    "delete": "Hapus",
+    "save": "Simpan",
+    "update": "Perbarui",
+    "cancel": "Batal",
+    "search": "Cari...",
+    "loading": "Memuat...",
+    "language": "Bahasa",
+    "download": "Unduh",
+    "upload": "Unggah",
+    "yes": "Ya",
+    "no": "Tidak",
+    "back": "Kembali"
+  },
+    "header": {
+    "title": "Panel Administrator",
+    "logout": "Keluar",
+    "profile": "Profil",
+    "settings": "Pengaturan",
+    "logout_title": "Ingin Keluar?", 
+    "logout_desc": "Anda akan diarahkan kembali ke halaman login. Apakah Anda yakin?"
+  },
+  "menu": {
+    "dashboard": "Dashboard",
+    "users": "Manajemen Pengguna",
+    "archives": "Arsip Digital",
+    "categories": "Kategori",
+    "links": "Link Tautan",
+    "profile": "Profil Saya"
+  },
+  "groups": {
+    "main": "UTAMA",
+    "management": "MANAJEMEN",
+    "storage": "PENYIMPANAN"
+  },
+  "landing": {
+    "login_btn": "Masuk Akun",
+    "badge": "Sistem Informasi Kearsipan Digital",
+    "hero_title_1": "Kelola Dokumen Lebih",
+    "hero_title_2": "Cerdas & Efisien",
+    "hero_desc": "Platform terpadu untuk menyimpan, mengelola, dan mengakses arsip perusahaan Anda dengan aman dan terstruktur.",
+    "cta_primary": "Mulai Sekarang",
+    "cta_secondary": "Pelajari Fitur",
+    "features_title": "Fitur Unggulan",
+    "features_subtitle": "Semua yang Anda butuhkan untuk manajemen arsip modern.",
+    "features": {
+      "archive": {
+        "title": "Manajemen Arsip",
+        "desc": "Simpan dan kelola dokumen digital Anda dengan struktur folder yang rapi dan aman."
+      },
+      "users": {
+        "title": "Kontrol Pengguna",
+        "desc": "Atur hak akses pengguna dengan role Admin, Editor, dan Viewer secara fleksibel."
+      },
+      "category": {
+        "title": "Kategori Dinamis",
+        "desc": "Kelompokkan arsip berdasarkan kategori dan penanggung jawab (PIC) yang jelas."
+      },
+      "links": {
+        "title": "Akses Cepat",
+        "desc": "Simpan tautan penting untuk akses cepat langsung dari dashboard utama."
+      }
+    }
+  },
+  "login": {
+    "title": "Selamat Datang Kembali",
+    "subtitle": "Masuk untuk mengelola arsip dan data SIKAP.",
+    "email": "Alamat Email",
+    "password": "Kata Sandi",
+    "forgot_pass": "Lupa Password?",
+    "btn_submit": "Masuk Aplikasi",
+    "footer": "Hubungi Admin jika lupa password.",
+    "loading": "Sedang memverifikasi akun...",
+    "error_default": "Email atau Password salah.",
+    "back_home": "Kembali ke Beranda"
+  },
+  "forgot": {
+    "title": "Lupa Kata Sandi?",
+    "subtitle": "Masukkan email Anda dan kami akan mengirimkan tautan untuk mengatur ulang kata sandi.",
+    "email_label": "Alamat Email",
+    "btn_submit": "Kirim Tautan Reset",
+    "back_login": "Kembali ke Login",
+    "success_title": "Cek Email Anda",
+    "success_desc": "Kami telah mengirimkan tautan reset ke",
+    "loading": "Mengirim tautan...",
+    "email_required": "Email wajib diisi"
+  },
+  "reset": {
+    "title": "Reset Kata Sandi",
+    "subtitle": "Buat kata sandi baru untuk akun Anda.",
+    "new_password": "Kata Sandi Baru",
+    "confirm_password": "Konfirmasi Kata Sandi",
+    "btn_submit": "Simpan Kata Sandi",
+    "success": "Kata sandi berhasil diubah! Silakan login.",
+    "password_mismatch": "Konfirmasi kata sandi tidak cocok.",
+    "password_min": "Kata sandi minimal 6 karakter.",
+    "token_invalid": "Token tidak valid atau kadaluarsa."
+  },
+  "users": {
+    "title": "Manajemen Pengguna",
+    "subtitle": "Kelola akses, edit profil, dan status akun.",
+    "add_btn": "Tambah Pengguna",
+    "add_manual": "Tambah Manual",
+    "import_csv": "Import CSV",
+    "table": {
+      "user": "Pengguna",
+      "role": "Peran",
+      "status": "Status",
+      "action": "Aksi"
+    },
+    "status": {
+      "active": "Aktif",
+      "locked": "Terkunci"
+    },
+    "modal": {
+      "create_title": "Tambah User Baru",
+      "edit_title": "Edit Pengguna",
+      "import_title": "Import User dari CSV",
+      "detail_title": "Detail Pengguna",
+      "lock_title": "Kunci Akun?",
+      "unlock_title": "Buka Kunci Akun?",
+      "lock_desc": "Status akses pengguna akan diubah.",
+      "delete_title": "Hapus Pengguna?",
+      "delete_desc": "Pengguna ini akan dihapus secara permanen beserta datanya.",
+      "name_label": "Nama Lengkap",
+      "email_label": "Email",
+      "password_label": "Password",
+      "password_new_label": "Password Baru (Opsional)",
+      "role_label": "Peran",
+      "file_label": "Pilih File CSV"
+    },
+    "messages": {
+      "create_process": "Menambahkan User...",
+      "create_success": "User berhasil dibuat!",
+      "create_error": "Gagal membuat user",
+      "import_process": "Mengimport Data CSV...",
+      "import_error": "Gagal mengimport CSV",
+      "update_process": "Menyimpan Perubahan...",
+      "update_success": "Data user berhasil diperbarui!",
+      "update_error": "Gagal update user",
+      "lock_process": "Mengunci Akun...",
+      "unlock_process": "Membuka Kunci...",
+      "status_success": "Status akses berhasil diubah",
+      "status_error": "Gagal mengubah status user",
+      "file_required": "Pilih file CSV terlebih dahulu",
+      "file_format": "Harap pilih file berformat .csv"
+    }
+  },
+  "categories": {
+    "title": "Manajemen Kategori",
+    "subtitle": "Kelola label dan penanggung jawab arsip.",
+    "add_btn": "Tambah",
+    "search_placeholder": "Cari kategori / PIC...",
+    "table": {
+      "no": "No",
+      "name": "Nama Kategori",
+      "pic": "Penanggung Jawab (PIC)",
+      "action": "Aksi",
+      "empty": "Data kategori tidak ditemukan.",
+      "pic_none": "- Belum ditentukan -"
+    },
+    "modal": {
+      "create_title": "Tambah Kategori",
+      "edit_title": "Edit Kategori",
+      "delete_title": "Hapus Kategori?",
+      "name_label": "Nama Kategori",
+      "name_placeholder": "Contoh: Surat Masuk",
+      "pic_label": "Penanggung Jawab (PIC)",
+      "pic_select": "-- Pilih Pengguna --",
+      "pic_help": "Pilih pengguna yang bertanggung jawab.",
+      "delete_desc": "akan dihapus.",
+      "delete_warn": "*Pastikan tidak ada arsip yang menggunakan kategori ini."
+    },
+    "messages": {
+      "validation_error": "Nama Kategori dan Penanggung Jawab wajib diisi!",
+      "create_process": "Menambahkan Kategori...",
+      "create_success": "Kategori berhasil dibuat",
+      "create_error": "Gagal membuat kategori",
+      "update_process": "Mengupdate Kategori...",
+      "update_success": "Kategori berhasil diperbarui",
+      "update_error": "Gagal update kategori",
+      "delete_process": "Menghapus Kategori...",
+      "delete_success": "Kategori berhasil dihapus",
+      "delete_error": "Gagal menghapus (Mungkin sedang digunakan)"
+    }
+  },
+  "links": {
+    "title": "Manajemen Tautan",
+    "subtitle": "Kelola tautan penting untuk halaman beranda.",
+    "add_btn": "Tambah Link",
+    "add_manual": "Tambah Manual",
+    "import_csv": "Import CSV",
+    "search_placeholder": "Cari judul link...",
+    "table": {
+      "status": "Status",
+      "title_url": "Judul & URL",
+      "category": "Kategori",
+      "action": "Aksi",
+      "empty": "Belum ada data.",
+      "active": "Aktif",
+      "inactive": "Nonaktif"
+    },
+    "modal": {
+      "create_title": "Tambah Link Baru",
+      "edit_title": "Edit Link",
+      "import_title": "Import Link dari CSV",
+      "delete_title": "Hapus Link?",
+      "title_label": "Judul Tautan",
+      "url_label": "URL / Alamat Web",
+      "category_label": "Kategori",
+      "category_select": "-- Pilih Kategori --",
+      "active_label": "Langsung Aktifkan",
+      "status_label": "Status Aktif",
+      "file_label": "Pilih File CSV",
+      "delete_desc": "akan dihapus permanen."
+    },
+    "messages": {
+      "validation_error": "Judul, URL, dan Kategori wajib diisi!",
+      "create_process": "Menambahkan Link...",
+      "create_success": "Link berhasil ditambahkan",
+      "create_error": "Gagal menambah link",
+      "import_process": "Mengimport Data CSV...",
+      "import_success": "Import berhasil!",
+      "import_error": "Gagal mengimport CSV",
+      "update_process": "Mengupdate Link...",
+      "update_success": "Link berhasil diperbarui",
+      "update_error": "Gagal update link",
+      "delete_process": "Menghapus Link...",
+      "delete_success": "Link berhasil dihapus",
+      "delete_error": "Gagal menghapus link",
+      "status_error": "Gagal mengubah status"
+    }
+  },
+  "archives": {
+    "title": "Arsip Digital",
+    "subtitle": "Direktori penyimpanan dokumen Anda.",
+    "search_placeholder": "Cari folder...",
+    "add_folder": "Folder Baru",
+    "empty_title": "Belum ada folder",
+    "empty_desc": "Buat folder baru untuk mulai menyimpan arsip.",
+    "items": "item",
+    "table": {
+      "name": "Nama Dokumen",
+      "uploader": "Pengupload",
+      "size": "Ukuran",
+      "action": "Aksi",
+      "empty_folder": "Folder ini masih kosong."
+    },
+    "modal": {
+      "create_title": "Buat Folder Baru",
+      "rename_title": "Ganti Nama Folder",
+      "delete_title": "Hapus Folder?",
+      "upload_title": "Upload File Baru",
+      "delete_file_title": "Hapus File?",
+      "folder_name_placeholder": "Nama Folder...",
+      "file_label": "Pilih File",
+      "file_placeholder": "Klik untuk memilih file",
+      "title_label": "Judul Dokumen (Opsional)",
+      "title_placeholder": "Sesuai nama file asli",
+      "delete_desc": "akan dihapus permanen beserta isinya.",
+      "delete_file_desc": "akan dihapus permanen."
+    },
+    "messages": {
+      "create_process": "Membuat Folder...",
+      "create_success": "Folder berhasil dibuat",
+      "create_error": "Gagal membuat folder",
+      "rename_process": "Mengubah Nama...",
+      "rename_success": "Nama folder berhasil diubah",
+      "rename_error": "Gagal mengubah nama folder",
+      "delete_process": "Menghapus Folder...",
+      "delete_success": "Folder berhasil dihapus",
+      "delete_error": "Gagal menghapus folder",
+      "upload_process": "Mengupload File...",
+      "upload_success": "Berhasil upload file!",
+      "upload_error": "Gagal upload file.",
+      "delete_file_process": "Menghapus File...",
+      "delete_file_success": "File berhasil dihapus",
+      "delete_file_error": "Gagal menghapus file",
+      "folder_not_found": "Folder tidak ditemukan"
+    }
+  },
+  "profile": {
+    "title": "Profil Saya",
+    "subtitle": "Kelola informasi akun dan foto profil Anda.",
+    "change_photo": "Ganti",
+    "edit_info": "Edit Informasi",
+    "name_label": "Nama Lengkap",
+    "email_label": "Alamat Email",
+    "email_hint": "(Tidak dapat diubah)",
+    "btn_save": "Simpan Perubahan",
+    "messages": {
+      "process": "Menyimpan Profil...",
+      "success": "Profil berhasil diperbarui!",
+      "error": "Gagal update profil",
+      "size_error": "Ukuran file maksimal 2MB"
+    }
+  },
+  "settings": {
+    "title": "Pengaturan Akun",
+    "subtitle": "Kelola keamanan dan kata sandi Anda.",
+    "change_password": "Ganti Kata Sandi",
+    "current_pass": "Kata Sandi Saat Ini",
+    "new_pass": "Kata Sandi Baru",
+    "confirm_pass": "Konfirmasi Kata Sandi Baru",
+    "btn_save": "Simpan Password",
+    "messages": {
+      "process": "Mengubah Kata Sandi...",
+      "success": "Kata sandi berhasil diubah!",
+      "error": "Gagal mengubah kata sandi",
+      "mismatch": "Konfirmasi kata sandi tidak cocok",
+      "min_length": "Kata sandi minimal 6 karakter"
+    }
+  },
+  "dashboard": {
+  "welcome": "Halo",
+  "subtitle": "Berikut adalah ringkasan sistem saat ini.",
+  "stats": {
+    "users": "Total Pengguna",
+    "categories": "Total Kategori",
+    "active_links": "Tautan Aktif",
+    "inactive_links": "Tautan Nonaktif",
+    "archives": "Total Arsip"
+  },
+  "chart_title": "Grafik Statistik Sistem",
+  "quick_access": "Akses Cepat",
+  "cards": {
+    "profile_desc": "Kelola informasi akun, foto profil, dan kata sandi Anda.",
+    "users_desc": "Tambah pengguna baru, atur role, atau kunci akun.",
+    "categories_desc": "Atur label kategori untuk pengelompokan arsip dan tautan.",
+    "links_desc": "Kelola tautan cepat yang muncul di halaman beranda.",
+    "archives_desc": "Akses direktori penyimpanan, upload, dan kelola dokumen.",
+    "guide_desc": "Panduan lengkap penggunaan sistem sesuai peran Anda.",
+    "action_view": "Lihat",
+    "action_manage": "Kelola",
+    "action_open": "Buka",
+    "action_read": "Baca"
+    },
+    "guide": {
+      "title": "Panduan Penggunaan",
+      "admin_content": "Sebagai Admin, Anda memiliki akses penuh untuk mengelola pengguna, kategori, tautan, dan seluruh arsip dalam sistem.",
+      "editor_content": "Sebagai Editor, Anda dapat membuat folder, mengunggah berkas, dan mengelola arsip milik Anda sendiri.",
+      "viewer_content": "Sebagai Viewer, Anda hanya dapat melihat dan mengunduh arsip yang diizinkan, tanpa bisa mengubah data.",
+      "download_btn": "Unduh Panduan PDF"
+    }
+  }
+}
