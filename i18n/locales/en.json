@@ -319,7 +319,7 @@
     "empty_desc": "Create a new folder to start archiving.",
     "load_error": "Failed to load folder data",
     "click_to_enter": "Click to enter",
-    "items": "items",
+    "items": "item",
     "pagination": {
       "showing": "Showing {start} - {end} of {total} items",
       "page": "Page {current} / {total}"

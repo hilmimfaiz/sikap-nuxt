@@ -166,7 +166,11 @@
       "password_label": "Password",
       "password_new_label": "Password Baru (Opsional)",
       "role_label": "Peran",
-      "file_label": "Pilih File CSV"
+      "file_label": "Pilih File CSV",
+      "import_guide": "Panduan Import:",
+      "import_guide_1": "Kolom: Name, Email, Password, Role",
+      "import_guide_2": "Role harus: admin, editor, atau viewer.",
+      "file_limit_info": "Maksimal 5MB"
     },
     "messages": {
       "create_process": "Menambahkan User...",
@@ -241,7 +245,7 @@
     }
   },
   "links": {
-    "title": "Link Management",
+    "title": "Manajemen Tautan",
     "subtitle": "Kelola tautan penting untuk halaman beranda.",
     "add_btn": "Tambah Link",
     "add_manual": "Tambah Manual",
@@ -433,7 +437,7 @@
       "profile_desc": "Kelola informasi akun, foto profil, dan kata sandi Anda.",
       "users_desc": "Tambah pengguna baru, atur role, atau kunci akun.",
       "categories_desc": "Atur label kategori untuk pengelompokan arsip dan tautan.",
-      "links_desc": "Manage quick links appearing on the home page.",
+      "links_desc": "Kelola tautan cepat yang muncul di halaman beranda.",
       "archives_desc": "Akses direktori penyimpanan, upload, dan kelola dokumen.",
       "guide_desc": "Panduan lengkap penggunaan sistem sesuai peran Anda.",
       "action_view": "Lihat",
@@ -444,8 +448,8 @@
     "guide": {
       "title": "Panduan Penggunaan",
       "admin_content": "Sebagai Admin, Anda memiliki akses penuh untuk mengelola pengguna, kategori, tautan, dan seluruh arsip dalam sistem.",
-      "editor_content": "As Editor, you can create folders, upload files, and manage your own archives.",
-      "viewer_content": "As Viewer, you can only view and download permitted archives without modifying data.",
+      "editor_content": "Sebagai Editor, Anda dapat membuat folder, mengunggah berkas, dan mengelola arsip milik Anda sendiri.",
+      "viewer_content": "Sebagai Viewer, Anda hanya dapat melihat dan mengunduh arsip yang diizinkan, tanpa bisa mengubah data.",
       "download_btn": "Unduh Panduan PDF"
     }
   },
