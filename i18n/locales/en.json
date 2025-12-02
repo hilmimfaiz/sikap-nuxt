@@ -166,7 +166,11 @@
       "password_label": "Password",
       "password_new_label": "New Password (Optional)",
       "role_label": "Role",
-      "file_label": "Select CSV File"
+      "file_label": "Select CSV File",
+      "import_guide": "Import Guide:",
+      "import_guide_1": "Columns: Name, Email, Password, Role",
+      "import_guide_2": "Role must be: admin, editor, or viewer.",
+      "file_limit_info": "Max 5MB"
     },
     "messages": {
       "create_process": "Adding User...",
@@ -319,7 +323,7 @@
     "empty_desc": "Create a new folder to start archiving.",
     "load_error": "Failed to load folder data",
     "click_to_enter": "Click to enter",
-    "items": "item",
+    "items": "items",
     "pagination": {
       "showing": "Showing {start} - {end} of {total} items",
       "page": "Page {current} / {total}"
@@ -450,36 +454,36 @@
     }
   },
   "chat": {
-    "new_contact": "New Contact",
-    "messages": "Messages",
-    "no_contacts": "No contacts found",
-    "no_conversations": "No conversations yet",
-    "start_new_chat": "Start New Chat",
-    "reply_to": "Reply to",
-    "yourself": "Yourself",
-    "type_message": "Type a message...",
+    "new_contact": "Kontak Baru",
+    "messages": "Pesan",
+    "no_contacts": "Tidak ada kontak ditemukan",
+    "no_conversations": "Belum ada percakapan",
+    "start_new_chat": "Mulai Chat Baru",
+    "reply_to": "Balas ke",
+    "yourself": "Diri sendiri",
+    "type_message": "Tulis pesan...",
     "chat_admin_tooltip": "Chat Admin",
-    "delete_confirm_title": "Delete Message?",
-    "delete_confirm": "Delete this message? It will be removed for everyone.",
-    "delete_error": "Failed to delete message."
+    "delete_confirm_title": "Hapus Pesan?",
+    "delete_confirm": "Hapus pesan ini? Pesan akan ditarik untuk semua orang.",
+    "delete_error": "Gagal menghapus pesan."
   },
   "notifications": {
-    "title": "Notifications",
-    "read_all": "Read All",
-    "delete_history": "Clear History",
-    "delete_1h": "Last 1 Hour",
-    "delete_24h": "Last 24 Hours",
-    "delete_7d": "Last 7 Days",
-    "delete_30d": "Last 30 Days",
-    "delete_old": "Older than 6 Months",
-    "empty_title": "No new notifications",
-    "empty_desc": "All notifications will appear here",
-    "confirm_delete": "Are you sure you want to clear this notification history?",
-    "delete_error": "Failed to delete notifications",
-    "load_error": "Failed to load notifications",
-    "time_just_now": "Just now",
-    "time_minutes_ago": "{min} mins ago",
-    "time_hours_ago": "{hour} hours ago"
+    "title": "Notifikasi",
+    "read_all": "Baca Semua",
+    "delete_history": "Hapus Riwayat",
+    "delete_1h": "1 Jam Terakhir",
+    "delete_24h": "24 Jam (Hari Ini)",
+    "delete_7d": "7 Hari Terakhir",
+    "delete_30d": "1 Bulan Terakhir",
+    "delete_old": "Lebih dari 6 Bulan",
+    "empty_title": "Tidak ada notifikasi baru",
+    "empty_desc": "Semua pemberitahuan akan muncul di sini",
+    "confirm_delete": "Apakah Anda yakin ingin menghapus riwayat notifikasi ini?",
+    "delete_error": "Gagal menghapus notifikasi",
+    "load_error": "Gagal mengambil notifikasi",
+    "time_just_now": "Baru saja",
+    "time_minutes_ago": "{min} menit lalu",
+    "time_hours_ago": "{hour} jam lalu"
   },
   "roles": {
     "super_admin": "Super Admin"
