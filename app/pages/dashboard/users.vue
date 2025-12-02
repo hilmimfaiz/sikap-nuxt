@@ -1,37 +1,114 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch, computed } from 'vue'
 
-// Konfigurasi Halaman
 definePageMeta({
-  layout: 'default',
-  middleware: 'auth' // FIX: Gunakan guest agar tidak loop redirect
+  layout: 'dashboard',
+  middleware: 'auth'
 })
 
-const { startLoading, stopLoading } = useGlobalLoading()
-const toast = useToast()
-const { t } = useI18n()
-const router = useRouter()
-
-// Cek jika user sudah login, langsung lempar ke dashboard
-const userCookie = useCookie('user_data')
-if (userCookie.value) {
-  navigateTo('/dashboard')
+// 1. Proteksi Halaman (Admin Only)
+const userCookie = useCookie<any>('user_data')
+if (userCookie.value?.role !== 'admin') {
+  await navigateTo('/dashboard')
 }
 
-// State Form
-const email = ref('')
-const password = ref('')
-const fullName = ref('') // Untuk Sign Up
-const showPassword = ref(false)
-const errorMessage = ref('')
-const isSubmitting = ref(false)
-const agreeTerms = ref(false) // Untuk Sign Up
+// 2. Inisialisasi Global Loading, Toast, & i18n
+const { startLoading, stopLoading } = useGlobalLoading()
+const toast = useToast()
+const { t } = useI18n() 
 
-// State Tampilan (Login vs Sign Up)
-const isLoginView = ref(true)
+// --- INTEGRASI CHAT ---
+const { setConversation, isOpen } = useChatState()
 
-// Background Grid Image (Secure)
-const gridBgImage = `url("data:image/svg+xml,%3Csvg width='60' height='60' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M0 0h60v60H0z' fill='none'/%3E%3Cpath d='M60 0v60H0V0z' stroke='%23000' stroke-width='1' fill='none'/%3E%3C/svg%3E")`
+const openChatWith = (user: any) => {
+  const conversationData = {
+    partnerId: user.id,
+    name: user.name,
+    photo: user.photoProfile,
+    role: user.role?.name || 'user'
+  }
+  setConversation(conversationData)
+  isOpen.value = true
+}
+
+// --- STATE MANAGEMENT & PAGINATION ---
+const search = ref('')
+const page = ref(1)
+const limit = ref(10)
+
+// Fetch Data dengan Pagination & Search
+const { data: response, pending, refresh, error } = await useFetch('/api/users', {
+  query: { search, page, limit },
+  watch: [page, search] 
+})
+
+// Computed Properties
+const users = computed(() => response.value?.data || [])
+const meta = computed(() => response.value?.meta || { total: 0, page: 1, limit: 10, totalPages: 1 })
+
+// Reset page saat search berubah
+watch(search, () => {
+  page.value = 1
+})
+
+const changePage = (newPage: number) => {
+  if (newPage >= 1 && newPage <= meta.value.totalPages) {
+    page.value = newPage
+  }
+}
+
+// --- STATE SELEKSI (BULK ACTION) ---
+const selectedUserIds = ref<number[]>([])
+const showBulkDeleteConfirm = ref(false)
+
+const isAllSelected = computed({
+  get: () => {
+    if (!users.value || users.value.length === 0) return false
+    const validUsers = users.value.filter((u: any) => u.id !== userCookie.value.id)
+    return validUsers.length > 0 && validUsers.every((u: any) => selectedUserIds.value.includes(u.id))
+  },
+  set: (val) => {
+    if (val) {
+      const validUsers = users.value.filter((u: any) => u.id !== userCookie.value.id)
+      selectedUserIds.value = validUsers.map((u: any) => u.id)
+    } else {
+      selectedUserIds.value = []
+    }
+  }
+})
+
+const toggleSelection = (id: number) => {
+  if (selectedUserIds.value.includes(id)) {
+    selectedUserIds.value = selectedUserIds.value.filter(i => i !== id)
+  } else {
+    selectedUserIds.value.push(id)
+  }
+}
+
+// Reset seleksi saat pindah halaman
+watch([page, search], () => {
+  selectedUserIds.value = []
+})
+
+// --- MODAL & FORM STATE ---
+const showCreateModal = ref(false)
+const showImportModal = ref(false)
+const showViewModal = ref(false)
+const showEditModal = ref(false)
+const showLockConfirm = ref(false)
+const showDeleteConfirm = ref(false)
+const showDropdown = ref(false)
+
+const selectedUser = ref<any>(null)
+const importFile = ref<File | null>(null)
+
+const form = ref({
+  name: '',
+  email: '',
+  password: '',
+  roleId: 3,
+  isActive: true
+})
 
 // Animation Trigger
 const isVisible = ref(false)
@@ -41,355 +118,553 @@ onMounted(() => {
   }, 100)
 })
 
-// Toggle View Function
-const toggleView = () => {
-  isLoginView.value = !isLoginView.value
-  errorMessage.value = ''
-  email.value = ''
-  password.value = ''
-  fullName.value = ''
-  agreeTerms.value = false
+// --- ACTIONS ---
+
+const closeModals = () => {
+  showCreateModal.value = false
+  showImportModal.value = false
+  showViewModal.value = false
+  showEditModal.value = false
+  showLockConfirm.value = false
+  showDeleteConfirm.value = false
+  showBulkDeleteConfirm.value = false
+  showDropdown.value = false
+  
+  form.value = { name: '', email: '', password: '', roleId: 3, isActive: true }
+  selectedUser.value = null
+  importFile.value = null
 }
 
-// Fungsi Login
-const handleLogin = async () => {
-  isSubmitting.value = true
-  startLoading(t('login.loading'))
-  errorMessage.value = ''
+const toggleDropdown = () => {
+  showDropdown.value = !showDropdown.value
+}
 
+// Bulk Delete
+const handleBulkDelete = async () => {
+  if (selectedUserIds.value.length === 0) return
+
+  startLoading(t('users.messages.bulk_delete_process', { count: selectedUserIds.value.length }))
   try {
-    const response: any = await $fetch('/api/auth/login', {
+    await $fetch('/api/users/bulk-delete', {
       method: 'POST',
-      body: { email: email.value, password: password.value }
+      body: { ids: selectedUserIds.value }
     })
-
-    const tokenCookie = useCookie('auth_token', { maxAge: 86400, path: '/' })
-    const userDataCookie = useCookie('user_data', { maxAge: 86400, path: '/' })
-    
-    tokenCookie.value = response.token || ('logged-in-' + Date.now())
-    userDataCookie.value = response.user
-
+    await refresh()
+    selectedUserIds.value = []
+    closeModals()
     await stopLoading()
-    isSubmitting.value = false
-    toast.success('Login berhasil!')
-    
-    // FIX: Gunakan router.push untuk navigasi SPA yang mulus
-    router.push('/dashboard')
-
-  } catch (err: any) {
-    console.error('Login Error:', err)
+    toast.success(t('users.messages.bulk_delete_success'))
+  } catch (e: any) {
     await stopLoading()
-    isSubmitting.value = false
-    errorMessage.value = err.data?.message || err.data?.statusMessage || t('login.error_default')
+    toast.error(e.data?.message || t('users.messages.bulk_delete_error'))
   }
 }
 
-// Fungsi Sign Up (Simulasi)
-const handleSignUp = async () => {
-  if (!agreeTerms.value) {
-    toast.warning('Anda harus menyetujui syarat dan ketentuan.')
-    return
+// Create User
+const handleCreateUser = async () => {
+  startLoading(t('users.messages.create_process'))
+  try {
+    await $fetch('/api/users/create', { method: 'POST', body: form.value })
+    await refresh()
+    closeModals()
+    await stopLoading()
+    toast.success(t('users.messages.create_success'))
+  } catch (e: any) {
+    await stopLoading()
+    toast.error(e.data?.message || t('users.messages.create_error'))
   }
+}
 
-  isSubmitting.value = true
-  startLoading('Mendaftarkan akun...')
-  errorMessage.value = ''
+// Import CSV
+const onFileChange = (e: any) => {
+  const file = e.target.files[0]
+  if (file && (file.type === "text/csv" || file.type === "application/vnd.ms-excel" || file.name.toLowerCase().endsWith('.csv'))) {
+    importFile.value = file
+  } else {
+    toast.warning(t('users.messages.file_format'))
+    e.target.value = null
+  }
+}
+
+const downloadTemplate = () => {
+  const csvContent = "Name,Email,Password,Role\nBudi Santoso,budi@sikap.com,rahasia123,editor\nSiti Aminah,siti@sikap.com,password123,viewer"
+  const blob = new Blob([csvContent], { type: 'text/csv' })
+  const url = window.URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = "template_users.csv"
+  a.click()
+  window.URL.revokeObjectURL(url)
+  toast.info('Template CSV diunduh')
+}
+
+const handleImport = async () => {
+  if (!importFile.value) return toast.warning(t('users.messages.file_required'))
+  
+  startLoading(t('users.messages.import_process'))
+  const formData = new FormData()
+  formData.append('file', importFile.value)
 
   try {
-    // Simulasi API Call
-    await new Promise(resolve => setTimeout(resolve, 1500))
-    
+    const res: any = await $fetch('/api/users/import', {
+      method: 'POST',
+      body: formData
+    })
+    await refresh()
+    closeModals()
     await stopLoading()
-    isSubmitting.value = false
-    toast.success('Pendaftaran berhasil! Silakan login.')
-    
-    // Kembali ke tampilan login
-    toggleView()
-
-  } catch (err: any) {
+    toast.success(res.message)
+  } catch (e: any) {
     await stopLoading()
-    isSubmitting.value = false
-    errorMessage.value = 'Gagal mendaftar. Silakan coba lagi.'
+    toast.error(e.data?.message || t('users.messages.import_error'))
   }
+}
+
+// View & Edit
+const openViewModal = (user: any) => {
+  selectedUser.value = user
+  showViewModal.value = true
+}
+
+const openEditModal = (user: any) => {
+  selectedUser.value = user
+  form.value = {
+    name: user.name,
+    email: user.email,
+    password: '',
+    roleId: user.roleId || 3,
+    isActive: user.isActive ?? true
+  }
+  showEditModal.value = true
+}
+
+const handleUpdateUser = async () => {
+  if (!selectedUser.value) return
+  startLoading(t('users.messages.update_process'))
+  try {
+    await $fetch(`/api/users/${selectedUser.value.id}`, {
+      method: 'PUT',
+      body: form.value
+    })
+    await refresh()
+    closeModals()
+    await stopLoading()
+    toast.success(t('users.messages.update_success'))
+  } catch (e: any) {
+    await stopLoading()
+    toast.error(e.data?.message || t('users.messages.update_error'))
+  }
+}
+
+// Lock User
+const openLockConfirm = (user: any) => {
+  selectedUser.value = user
+  showLockConfirm.value = true
+}
+
+const toggleUserLock = async () => {
+  if (!selectedUser.value) return
+  
+  const isLocking = selectedUser.value.isActive 
+  startLoading(isLocking ? t('users.messages.lock_process') : t('users.messages.unlock_process'))
+  
+  try {
+    const newStatus = !isLocking
+    await $fetch(`/api/users/${selectedUser.value.id}`, {
+      method: 'PUT',
+      body: { isActive: newStatus }
+    })
+    await refresh()
+    closeModals()
+    await stopLoading()
+    toast.success(t('users.messages.status_success'))
+  } catch (e: any) {
+    await stopLoading()
+    toast.error(t('users.messages.status_error'))
+  }
+}
+
+// Delete User
+const openDeleteConfirm = (user: any) => {
+  selectedUser.value = user
+  showDeleteConfirm.value = true
+}
+
+const handleDeleteUser = async () => {
+  if (!selectedUser.value) return
+  
+  startLoading(t('users.messages.delete_process'))
+  try {
+    await $fetch(`/api/users/${selectedUser.value.id}`, { method: 'DELETE' })
+    await refresh()
+    closeModals()
+    await stopLoading()
+    toast.success(t('users.messages.delete_success'))
+  } catch (e: any) {
+    await stopLoading()
+    toast.error(e.data?.message || t('users.messages.delete_error'))
+  }
+}
+
+// Helpers
+const getRoleBadgeClass = (roleName: string) => {
+  switch (roleName) {
+    case 'admin': return 'bg-gradient-to-r from-blue-500 to-cyan-500 text-white'
+    case 'editor': return 'bg-gradient-to-r from-emerald-500 to-teal-500 text-white'
+    default: return 'bg-gradient-to-r from-gray-500 to-slate-500 text-white'
+  }
+}
+
+const getStatusBadgeClass = (isActive: boolean) => {
+  return isActive 
+    ? 'bg-gradient-to-r from-green-500 to-emerald-500 text-white'
+    : 'bg-gradient-to-r from-red-500 to-rose-500 text-white'
 }
 </script>
 
 <template>
-  <div class="min-h-screen flex items-center justify-center relative overflow-hidden bg-gradient-to-br from-indigo-50 via-white to-blue-50 dark:from-gray-950 dark:via-gray-900 dark:to-blue-950 px-4 py-12">
+  <div @click="showDropdown = false" class="min-h-screen bg-gradient-to-br from-blue-50 via-white to-cyan-50 dark:from-gray-950 dark:via-gray-900 dark:to-blue-950/20 py-6 px-4 sm:px-6 lg:px-8">
     
-    <div class="absolute inset-0 -z-10 overflow-hidden pointer-events-none">
-      <div class="absolute top-1/4 -left-20 w-96 h-96 bg-gradient-to-r from-blue-400/20 to-cyan-400/20 rounded-full blur-3xl animate-float"></div>
-      <div class="absolute bottom-1/4 -right-20 w-80 h-80 bg-gradient-to-r from-purple-400/15 to-pink-400/15 rounded-full blur-3xl animate-float-delay"></div>
+    <div 
+      class="max-w-6xl mx-auto transition-all duration-700 ease-out"
+      :class="isVisible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'"
+    >
       
-      <div class="absolute inset-0 opacity-5 dark:opacity-10">
-        <div class="absolute inset-0" :style="{ backgroundImage: gridBgImage }"></div>
+      <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6 sm:mb-8 animate-soft-slide-down" style="animation-delay: 100ms;">
+        <div class="space-y-1">
+          <h1 class="text-2xl sm:text-3xl font-extrabold bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-cyan-600 dark:from-blue-400 dark:to-cyan-400">
+            {{ $t('users.title') }}
+          </h1>
+          <p class="text-sm text-gray-600 dark:text-gray-400">
+            {{ $t('users.subtitle') }}
+          </p>
+        </div>
+        
+        <div class="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
+          <transition enter-active-class="transition duration-200 ease-out" enter-from-class="opacity-0 scale-90" enter-to-class="opacity-100 scale-100" leave-active-class="transition duration-150 ease-in" leave-from-class="opacity-100 scale-100" leave-to-class="opacity-0 scale-90">
+            <button 
+              v-if="selectedUserIds.length > 0"
+              @click="showBulkDeleteConfirm = true"
+              class="bg-red-600 hover:bg-red-700 text-white px-5 py-2.5 rounded-xl flex items-center justify-center gap-2 shadow-lg hover:shadow-xl transition-all text-sm font-medium"
+            >
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+              {{ $t('common.delete') }} ({{ selectedUserIds.length }})
+            </button>
+          </transition>
+
+          <div class="relative w-full sm:w-60">
+            <input 
+              v-model="search" 
+              type="text" 
+              :placeholder="$t('common.search')" 
+              class="w-full pl-9 pr-4 py-2.5 rounded-xl border border-blue-100 dark:border-gray-700 bg-white/80 dark:bg-gray-800/80 text-gray-700 dark:text-gray-200 focus:ring-2 focus:ring-blue-500 outline-none transition-all shadow-sm backdrop-blur-sm text-sm placeholder-gray-400"
+            />
+            <svg class="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+          </div>
+
+          <div class="relative w-full sm:w-auto">
+            <button 
+              @click.stop="toggleDropdown"
+              class="w-full sm:w-auto group relative overflow-hidden bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700 text-white px-5 py-2.5 rounded-xl flex items-center justify-center gap-2 transition-all duration-300 shadow-lg hover:shadow-xl active:scale-95 text-sm font-medium"
+            >
+              <span class="relative z-10 flex items-center gap-2">
+                + {{ $t('users.add_btn') }}
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 transition-transform duration-300" :class="showDropdown ? 'rotate-180' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+                </svg>
+              </span>
+              <div class="absolute inset-0 bg-white/20 -translate-x-full group-hover:translate-x-full transition-transform duration-700"></div>
+            </button>
+
+            <transition enter-active-class="transition duration-200 ease-out" enter-from-class="opacity-0 -translate-y-2" enter-to-class="opacity-100 translate-y-0" leave-active-class="transition duration-150 ease-in" leave-from-class="opacity-100 translate-y-0" leave-to-class="opacity-0 -translate-y-2">
+              <div v-if="showDropdown" class="absolute top-full right-0 mt-2 w-56 bg-white/95 dark:bg-gray-900/95 backdrop-blur-2xl rounded-xl shadow-xl border border-blue-100 dark:border-gray-700/50 py-2 z-20 overflow-hidden">
+                <button @click="showCreateModal = true" class="w-full text-left px-4 py-3 text-sm text-gray-700 dark:text-gray-200 hover:bg-blue-50 dark:hover:bg-blue-900/30 flex items-center gap-3 transition-colors">
+                  <span class="text-blue-500 text-lg">✏️</span>
+                  <span>{{ $t('users.add_manual') }}</span>
+                </button>
+                <button @click="showImportModal = true" class="w-full text-left px-4 py-3 text-sm text-gray-700 dark:text-gray-200 hover:bg-green-50 dark:hover:bg-green-900/30 flex items-center gap-3 transition-colors border-t border-gray-100 dark:border-gray-800">
+                  <span class="text-green-500 text-lg">📊</span>
+                  <span>{{ $t('users.import_csv') }}</span>
+                </button>
+              </div>
+            </transition>
+          </div>
+        </div>
       </div>
-    </div>
 
-    <div class="absolute top-6 left-6 z-30 animate-fade-in-down">
-      <NuxtLink to="/" class="group flex items-center gap-2 px-4 py-2.5 bg-white/80 dark:bg-gray-900/90 backdrop-blur-xl border border-gray-200/50 dark:border-gray-800/60 rounded-full shadow-lg hover:shadow-xl transition-all duration-300 text-sm font-medium text-gray-700 dark:text-gray-300 hover:text-blue-500 dark:hover:text-cyan-400">
-        <svg class="w-4 h-4 transition-transform group-hover:-translate-x-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-        </svg>
-        <span>{{ $t('login.back_home') }}</span>
-      </NuxtLink>
-    </div>
-
-    <div class="absolute top-6 right-6 z-30 flex items-center gap-3 animate-fade-in-down">
-      <LanguageSwitcher />
-      <ThemeToggle />
-    </div>
-
-    <div class="w-full max-w-5xl grid grid-cols-1 lg:grid-cols-2 gap-8 animate-fade-in">
-      
-      <div class="hidden lg:flex flex-col justify-center p-8">
-        <div class="space-y-8">
+      <div v-if="error" class="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl p-4 mb-6 text-red-600 dark:text-red-400 animate-pulse">
+        <div class="flex items-center gap-3">
+          <div class="w-8 h-8 bg-red-100 dark:bg-red-900/30 rounded-lg flex items-center justify-center text-red-500">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            </svg>
+          </div>
           <div>
-            <div class="mb-6 inline-block">
-              <img src="/logo.png" alt="Logo" class="h-16 w-auto drop-shadow-lg" />
-            </div>
-            <h1 class="text-5xl font-bold leading-tight mb-4">
-              <span class="bg-gradient-to-r from-blue-600 via-cyan-500 to-indigo-600 bg-clip-text text-transparent">Study Online,</span><br>
-              <span class="text-gray-800 dark:text-white">Learn Online</span>
-            </h1>
-            <p class="text-xl text-gray-600 dark:text-gray-300 mb-6">
-              Learn From World's Best Instructors Around The World.
-            </p>
-          </div>
-
-          <div class="space-y-6">
-            <div class="flex items-start gap-4">
-              <div class="mt-1 p-2 rounded-lg bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400">
-                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
-              </div>
-              <div>
-                <h3 class="font-semibold text-gray-800 dark:text-white">World-Class Instructors</h3>
-                <p class="text-gray-600 dark:text-gray-400">Learn from industry experts.</p>
-              </div>
-            </div>
-
-            <div class="flex items-start gap-4">
-              <div class="mt-1 p-2 rounded-lg bg-cyan-50 dark:bg-cyan-900/30 text-cyan-600 dark:text-cyan-400">
-                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
-              </div>
-              <div>
-                <h3 class="font-semibold text-gray-800 dark:text-white">Secure Learning</h3>
-                <p class="text-gray-600 dark:text-gray-400">Your data is protected.</p>
-              </div>
-            </div>
+            <h3 class="font-semibold text-sm">{{ $t('users.load_error') }}</h3>
+            <p class="text-xs opacity-80 mt-0.5">{{ $t('users.load_error_desc') }}</p>
           </div>
         </div>
       </div>
 
-      <div class="flex items-center justify-center p-4">
-        <div class="w-full max-w-md">
-          <div class="relative group">
-            <div class="relative bg-white/90 dark:bg-gray-900/90 backdrop-blur-xl rounded-3xl shadow-2xl border border-white/30 dark:border-gray-800/50 overflow-hidden transition-all duration-500">
-              
-              <div class="absolute inset-0 rounded-3xl bg-gradient-to-r from-blue-500/10 via-cyan-500/10 to-indigo-500/10 opacity-0 group-hover:opacity-100 transition-opacity duration-700 pointer-events-none"></div>
-              <div class="absolute -inset-1 bg-gradient-to-r from-blue-600/20 via-transparent to-cyan-600/20 opacity-0 group-hover:opacity-30 blur-xl transition-opacity duration-1000"></div>
-
-              <div class="relative p-8 sm:p-10">
-                
-                <div class="flex mb-8 bg-gray-100 dark:bg-gray-800 rounded-xl p-1">
-                  <button
-                    @click="isLoginView = true"
-                    :class="['flex-1 py-2.5 rounded-lg text-sm font-bold transition-all duration-300', isLoginView ? 'bg-white dark:bg-gray-700 text-blue-600 dark:text-cyan-400 shadow-md' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200']"
-                  >
-                    Sign In
-                  </button>
-                  <button
-                    @click="isLoginView = false"
-                    :class="['flex-1 py-2.5 rounded-lg text-sm font-bold transition-all duration-300', !isLoginView ? 'bg-white dark:bg-gray-700 text-blue-600 dark:text-cyan-400 shadow-md' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200']"
-                  >
-                    Create Account
-                  </button>
-                </div>
-
-                <div class="text-center mb-8 animate-slide-down">
-                  <h2 class="text-2xl font-bold text-gray-900 dark:text-white mb-2">
-                    {{ isLoginView ? $t('login.title') : 'Create an Account' }}
-                  </h2>
-                  <p class="text-sm text-gray-500 dark:text-gray-400">
-                    {{ isLoginView ? $t('login.subtitle') : 'Join us and start learning today.' }}
-                  </p>
-                </div>
-
-                <Transition name="slide-down">
-                  <div v-if="errorMessage" class="mb-6 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl text-red-600 dark:text-red-400 text-sm flex items-start gap-3 animate-shake">
-                    <svg class="w-5 h-5 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
-                    <span class="font-medium">{{ errorMessage }}</span>
+      <div class="bg-white/80 dark:bg-gray-900/80 backdrop-blur-2xl rounded-2xl shadow-xl border border-blue-100 dark:border-gray-800/50 overflow-hidden flex flex-col h-full animate-soft-slide-up" style="animation-delay: 200ms;">
+        <div class="overflow-x-auto flex-1">
+          <table class="w-full min-w-full text-left text-sm">
+            <thead class="bg-gradient-to-r from-blue-600/5 to-cyan-500/5 dark:from-blue-500/10 dark:to-cyan-500/10 text-gray-600 dark:text-gray-300 uppercase text-xs font-bold">
+              <tr>
+                <th class="px-6 py-4 w-10">
+                  <input type="checkbox" v-model="isAllSelected" class="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600" />
+                </th>
+                <th class="px-6 py-4 font-medium">{{ $t('users.table.user') }}</th>
+                <th class="px-6 py-4 font-medium hidden sm:table-cell">{{ $t('users.table.role') }}</th>
+                <th class="px-6 py-4 font-medium">{{ $t('users.table.status') }}</th>
+                <th class="px-6 py-4 font-medium text-center">{{ $t('users.table.action') }}</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-blue-50 dark:divide-gray-800">
+              <tr v-if="pending">
+                <td colspan="5" class="px-6 py-16 text-center text-gray-400 dark:text-gray-500">
+                  <div class="flex justify-center items-center gap-2">
+                    <div class="animate-spin w-5 h-5 border-2 border-blue-500 border-t-transparent rounded-full"></div>
+                    <span class="text-sm font-medium">{{ $t('common.loading') }}</span>
                   </div>
-                </Transition>
-
-                <form @submit.prevent="isLoginView ? handleLogin() : handleSignUp()" class="space-y-5">
-                  
-                  <Transition name="fade">
-                    <div v-if="!isLoginView" class="group">
-                      <label class="block text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-2">Full Name</label>
-                      <div class="relative">
-                        <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-gray-400">
-                          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
-                        </div>
-                        <input v-model="fullName" type="text" required class="w-full pl-12 pr-4 py-3.5 bg-gray-50/50 dark:bg-gray-800/50 border border-gray-300/50 dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500 outline-none transition-all text-sm text-gray-900 dark:text-white placeholder-gray-400" placeholder="John Doe" />
-                      </div>
+                </td>
+              </tr>
+              <tr v-else-if="!users.length">
+                <td colspan="5" class="px-6 py-16 text-center text-gray-400 dark:text-gray-500 italic">
+                  <div class="flex flex-col items-center gap-2">
+                    <div class="w-12 h-12 bg-blue-50 dark:bg-gray-800 rounded-xl flex items-center justify-center text-xl opacity-60">
+                      👥
                     </div>
-                  </Transition>
+                    <p class="text-sm">{{ search ? $t('users.empty_search') : $t('users.empty_data') }}</p>
+                  </div>
+                </td>
+              </tr>
 
-                  <div class="group animate-slide-up delay-100">
-                    <label class="block text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-2">{{ $t('login.email') }}</label>
-                    <div class="relative">
-                      <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-gray-400">
-                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
-                      </div>
-                      <input v-model="email" type="email" required class="w-full pl-12 pr-4 py-3.5 bg-gray-50/50 dark:bg-gray-800/50 border border-gray-300/50 dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500 outline-none transition-all text-sm text-gray-900 dark:text-white placeholder-gray-400" :placeholder="isLoginView ? 'admin@sikap.com' : 'student@email.com'" />
+              <tr v-for="user in users" :key="user.id" class="hover:bg-blue-50/50 dark:hover:bg-blue-900/10 transition-all duration-300 group">
+                <td class="px-6 py-4">
+                  <input type="checkbox" :checked="selectedUserIds.includes(user.id)" @change="toggleSelection(user.id)" :disabled="user.id === userCookie.id" class="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600 disabled:opacity-50 disabled:cursor-not-allowed" />
+                </td>
+                <td class="px-6 py-4">
+                  <div class="flex items-center gap-3">
+                    <div class="w-9 h-9 rounded-full bg-gray-200 dark:bg-gray-600 overflow-hidden flex items-center justify-center border border-gray-300 dark:border-gray-500 text-xs font-bold text-gray-500 dark:text-gray-400 shrink-0 shadow-sm">
+                      <img v-if="user.photoProfile" :src="user.photoProfile" class="w-full h-full object-cover" />
+                      <span v-else>{{ user.name.charAt(0).toUpperCase() }}</span>
+                    </div>
+                    <div class="min-w-0 flex-1">
+                      <div class="font-semibold text-gray-900 dark:text-gray-100 truncate text-sm">{{ user.name }}</div>
+                      <div class="text-xs text-gray-500 dark:text-gray-400 truncate">{{ user.email }}</div>
                     </div>
                   </div>
-
-                  <div class="group animate-slide-up delay-200">
-                    <div class="flex justify-between items-center mb-2">
-                      <label class="block text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">{{ $t('login.password') }}</label>
-                      <NuxtLink v-if="isLoginView" to="/forgot-password" class="text-xs font-semibold text-blue-600 hover:text-blue-700 dark:text-cyan-400 dark:hover:text-cyan-300 transition-colors">
-                        {{ $t('login.forgot_pass') }}
-                      </NuxtLink>
-                    </div>
-                    <div class="relative">
-                      <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-gray-400">
-                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
-                      </div>
-                      <input v-model="password" :type="showPassword ? 'text' : 'password'" required class="w-full pl-12 pr-12 py-3.5 bg-gray-50/50 dark:bg-gray-800/50 border border-gray-300/50 dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500 outline-none transition-all text-sm text-gray-900 dark:text-white placeholder-gray-400" placeholder="••••••••" :minlength="isLoginView ? 6 : 8" />
-                      <button type="button" @click="showPassword = !showPassword" class="absolute inset-y-0 right-0 pr-4 flex items-center text-gray-400 hover:text-blue-600 dark:hover:text-cyan-400 transition-colors focus:outline-none">
-                        <svg v-if="showPassword" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
-                        <svg v-else class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.542-7a10.05 10.05 0 011.574-2.59M6 6l12 12 M17.94 17.94A10.07 10.07 0 0112 19c-4.478 0-8.268-2.943-9.542-7a10.05 10.05 0 012.433-3.633"/></svg>
-                      </button>
-                    </div>
+                </td>
+                <td class="px-6 py-4 hidden sm:table-cell">
+                  <span :class="getRoleBadgeClass(user.role?.name)" class="px-2.5 py-1 rounded-lg text-[10px] font-semibold capitalize tracking-wide shadow-sm">
+                    {{ user.role?.name === 'admin' ? $t('roles.super_admin') : user.role?.name }}
+                  </span>
+                </td>
+                <td class="px-6 py-4">
+                  <span :class="getStatusBadgeClass(user.isActive ?? true)" class="px-2.5 py-1 rounded-lg text-[10px] font-semibold capitalize tracking-wide shadow-sm">
+                    {{ (user.isActive ?? true) ? $t('users.status.active') : $t('users.status.locked') }}
+                  </span>
+                </td>
+                <td class="px-6 py-4">
+                  <div class="flex justify-center items-center gap-2 opacity-80 group-hover:opacity-100 transition-opacity">
+                    <button v-if="user.email !== userCookie.email" @click="openChatWith(user)" class="p-2 text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/20 hover:bg-indigo-100 dark:hover:bg-indigo-900/40 rounded-lg transition-colors shadow-sm border border-indigo-100 dark:border-indigo-800/30" :title="'Chat dengan ' + user.name">
+                      <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
+                    </button>
+                    <button @click="openViewModal(user)" class="p-2 text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 dark:hover:bg-blue-900/40 rounded-lg transition-colors shadow-sm border border-blue-100 dark:border-blue-800/30" :title="$t('common.view')">
+                      <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                    </button>
+                    <button @click="openEditModal(user)" class="p-2 text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 hover:bg-amber-100 dark:hover:bg-amber-900/40 rounded-lg transition-colors shadow-sm border border-amber-100 dark:border-amber-800/30" :title="$t('common.edit')">
+                      <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+                    </button>
+                    <button v-if="user.email !== userCookie.email" @click="openLockConfirm(user)" class="p-2 rounded-lg transition-colors shadow-sm border" :class="(user.isActive ?? true) ? 'text-yellow-600 dark:text-yellow-400 bg-yellow-50 dark:bg-yellow-900/20 hover:bg-yellow-100 dark:hover:bg-yellow-900/40 border-yellow-100 dark:border-yellow-800/30' : 'text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-900/20 hover:bg-green-100 dark:hover:bg-green-900/40 border-green-100 dark:border-green-800/30'">
+                      <svg v-if="user.isActive ?? true" xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>
+                      <svg v-else xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z" /></svg>
+                    </button>
+                    <button v-if="user.email !== userCookie.email" @click="openDeleteConfirm(user)" class="p-2 text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 hover:bg-red-100 dark:hover:bg-red-900/40 rounded-lg transition-colors shadow-sm border border-red-100 dark:border-red-800/30" :title="$t('common.delete')">
+                      <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                    </button>
                   </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
 
-                  <Transition name="fade">
-                    <div v-if="!isLoginView" class="flex items-start gap-3 animate-slide-up delay-300">
-                      <div class="flex items-center h-5">
-                        <input v-model="agreeTerms" id="terms" type="checkbox" required class="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600" />
-                      </div>
-                      <label for="terms" class="text-xs text-gray-600 dark:text-gray-400">
-                        I agree to the <a href="#" class="text-blue-600 hover:underline">Terms</a> and <a href="#" class="text-blue-600 hover:underline">Privacy Policy</a>.
-                      </label>
-                    </div>
-                  </Transition>
+        <div v-if="meta.totalPages > 1" class="px-6 py-4 border-t border-blue-100 dark:border-gray-700/50 flex flex-col sm:flex-row justify-between items-center gap-4 bg-blue-50/30 dark:bg-gray-800/30">
+          <span class="text-xs text-gray-500 dark:text-gray-400 font-medium">
+            {{ $t('users.pagination.showing', { start: (meta.page - 1) * meta.limit + 1, end: Math.min(meta.page * meta.limit, meta.total), total: meta.total }) }}
+          </span>
 
-                  <button 
-                    type="submit" 
-                    :disabled="isSubmitting || (!isLoginView && !agreeTerms)"
-                    class="w-full bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700 text-white font-bold py-3.5 rounded-xl shadow-lg shadow-blue-500/30 hover:shadow-xl hover:shadow-blue-500/40 transition-all duration-300 transform hover:-translate-y-0.5 active:scale-95 flex justify-center items-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed animate-slide-up delay-300 group"
-                  >
-                    <span class="relative z-10 flex items-center gap-2">
-                      <span v-if="!isSubmitting">{{ isLoginView ? $t('login.btn_submit') : 'Create Account' }}</span>
-                      <span v-else>{{ $t('login.loading') }}</span>
-                      <svg v-if="!isSubmitting" class="w-4 h-4 transition-transform group-hover:translate-x-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
-                      <svg v-else class="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-                    </span>
-                  </button>
-
-                </form>
-
-                <div class="relative my-8">
-                  <div class="absolute inset-0 flex items-center">
-                    <div class="w-full border-t border-gray-200 dark:border-gray-700"></div>
-                  </div>
-                  <div class="relative flex justify-center text-xs uppercase">
-                    <span class="bg-white dark:bg-gray-900 px-2 text-gray-500">Or continue with</span>
-                  </div>
-                </div>
-
-                <div class="grid grid-cols-2 gap-3">
-                  <button type="button" class="flex items-center justify-center gap-2 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors text-sm font-medium text-gray-700 dark:text-gray-300">
-                    <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
-                    GitHub
-                  </button>
-                  <button type="button" class="flex items-center justify-center gap-2 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors text-sm font-medium text-gray-700 dark:text-gray-300">
-                    <svg class="w-5 h-5 text-blue-500" fill="currentColor" viewBox="0 0 24 24"><path d="M23.954 11.629c-.885.389-1.83.654-2.825.775 1.014-.611 1.794-1.574 2.163-2.723-.951.564-2.005.974-3.127 1.195-.897-.957-2.178-1.555-3.594-1.555-2.717 0-4.92 2.203-4.92 4.917 0 .39.045.765.127 1.124C7.691 14.816 4.066 12.89 1.64 10.026c-.427.722-.666 1.561-.666 2.475 0 1.71.87 3.213 2.188 4.096-.807-.026-1.566-.248-2.228-.616v.061c0 2.385 1.693 4.374 3.946 4.827-.413.111-.849.171-1.296.171-.314 0-.615-.03-.916-.086.631 1.953 2.445 3.377 4.604 3.417-1.68 1.319-3.809 2.105-6.102 2.105-.397 0-.79-.023-1.177-.067 2.179 1.397 4.768 2.212 7.548 2.212 9.054 0 14.002-7.496 14.002-13.986 0-.209 0-.42-.015-.63.961-.689 1.8-1.56 2.46-2.548l-.047-.02z"/></svg>
-                    Twitter
-                  </button>
-                </div>
-
-                <p class="mt-8 text-center text-xs text-gray-400">
-                  © 2025 SIKAP App. {{ $t('login.rights_reserved') || 'All rights reserved.' }}
-                </p>
-
-              </div>
-            </div>
+          <div class="flex items-center gap-2">
+            <button @click="changePage(meta.page - 1)" :disabled="meta.page === 1" class="p-2 rounded-lg border border-blue-200 dark:border-gray-600 hover:bg-blue-50 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-gray-600 dark:text-gray-300">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+            </button>
+            <span class="text-xs font-semibold text-gray-700 dark:text-gray-300 mx-2">
+              {{ $t('users.pagination.page', { current: meta.page, total: meta.totalPages }) }}
+            </span>
+            <button @click="changePage(meta.page + 1)" :disabled="meta.page === meta.totalPages" class="p-2 rounded-lg border border-blue-200 dark:border-gray-600 hover:bg-blue-50 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-gray-600 dark:text-gray-300">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+            </button>
           </div>
         </div>
       </div>
     </div>
 
-    <div class="absolute inset-0 overflow-hidden pointer-events-none">
-      <div v-for="i in 20" :key="i" 
-        :style="{
-          left: `${Math.random() * 100}%`,
-          top: `${Math.random() * 100}%`,
-          animationDelay: `${Math.random() * 5}s`,
-          animationDuration: `${10 + Math.random() * 20}s`
-        }"
-        class="absolute w-1 h-1 bg-blue-400/20 dark:bg-cyan-400/20 rounded-full animate-float-particle"
-      ></div>
-    </div>
+    <Transition enter-active-class="transition duration-300" enter-from-class="opacity-0" enter-to-class="opacity-100" leave-active-class="transition duration-200" leave-from-class="opacity-100" leave-to-class="opacity-0">
+      <div v-if="showCreateModal || showImportModal || showViewModal || showEditModal || showLockConfirm || showDeleteConfirm || showBulkDeleteConfirm" class="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm" @click="closeModals"></div>
+    </Transition>
+
+    <Transition enter-active-class="transition duration-400 cubic-bezier(0.16, 1, 0.3, 1)" enter-from-class="opacity-0 scale-95 translate-y-8" enter-to-class="opacity-100 scale-100 translate-y-0" leave-active-class="transition duration-300 ease-in" leave-from-class="opacity-100 scale-100" leave-to-class="opacity-0 scale-95 translate-y-8">
+      <div v-if="showCreateModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
+        <div class="bg-white dark:bg-gray-900 rounded-[1.5rem] shadow-2xl border border-gray-100 dark:border-gray-800 w-full max-w-md pointer-events-auto overflow-hidden max-h-[90vh] overflow-y-auto relative">
+          <div class="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-blue-500 to-cyan-500"></div>
+          <div class="px-6 py-5 border-b border-gray-100 dark:border-gray-800 flex justify-between items-center">
+            <h3 class="text-lg font-bold text-gray-900 dark:text-white">{{ $t('users.modal.create_title') }}</h3>
+            <button @click="closeModals" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg></button>
+          </div>
+          <form @submit.prevent="handleCreateUser" class="p-6 space-y-4">
+            <div><label class="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1.5 uppercase tracking-wide">{{ $t('users.modal.name_label') }}</label><input v-model="form.name" required class="w-full px-4 py-2.5 bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500 transition-all text-sm" /></div>
+            <div><label class="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1.5 uppercase tracking-wide">{{ $t('users.modal.email_label') }}</label><input v-model="form.email" type="email" required class="w-full px-4 py-2.5 bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500 transition-all text-sm" /></div>
+            <div><label class="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1.5 uppercase tracking-wide">{{ $t('users.modal.password_label') }}</label><input v-model="form.password" type="password" required class="w-full px-4 py-2.5 bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500 transition-all text-sm" placeholder="Min. 6 karakter" /></div>
+            <div><label class="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1.5 uppercase tracking-wide">{{ $t('users.modal.role_label') }}</label><div class="relative"><select v-model="form.roleId" class="w-full px-4 py-2.5 bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/40 transition-all appearance-none text-sm"><option :value="1">Admin</option><option :value="2">Editor</option><option :value="3">Viewer</option></select><div class="absolute inset-y-0 right-0 flex items-center px-4 pointer-events-none text-gray-500"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg></div></div></div>
+            <div class="pt-2 flex gap-3"><button type="button" @click="closeModals" class="flex-1 py-2.5 border border-gray-200 dark:border-gray-700 rounded-lg font-medium text-gray-600 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-800 transition text-sm">{{ $t('common.cancel') }}</button><button type="submit" class="flex-1 py-2.5 bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700 text-white font-semibold rounded-lg shadow-md transition-all transform hover:-translate-y-0.5 text-sm">{{ $t('common.save') }}</button></div>
+          </form>
+        </div>
+      </div>
+    </Transition>
+
+    <Transition enter-active-class="transition duration-400 cubic-bezier(0.16, 1, 0.3, 1)" enter-from-class="opacity-0 scale-95 translate-y-8" enter-to-class="opacity-100 scale-100 translate-y-0" leave-active-class="transition duration-300 ease-in" leave-from-class="opacity-100 scale-100" leave-to-class="opacity-0 scale-95 translate-y-8">
+      <div v-if="showImportModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
+        <div class="bg-white dark:bg-gray-900 rounded-[1.5rem] shadow-2xl border border-gray-100 dark:border-gray-800 w-full max-w-lg pointer-events-auto p-6 relative overflow-hidden">
+          <div class="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-green-500 to-emerald-500"></div>
+          <div class="flex justify-between items-center mb-4">
+            <h3 class="text-lg font-bold text-gray-900 dark:text-white">{{ $t('users.modal.import_title') }}</h3>
+            <button @click="closeModals" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg></button>
+          </div>
+          <div class="bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800 rounded-xl p-4 mb-4 text-xs text-blue-700 dark:text-blue-300">
+            <p class="font-semibold mb-1">{{ $t('users.modal.import_guide') }}</p>
+            <ul class="list-disc pl-4 space-y-0.5 opacity-90">
+              <li>{{ $t('users.modal.import_guide_1') }}</li>
+              <li>{{ $t('users.modal.import_guide_2') }}</li>
+            </ul>
+          </div>
+          <div class="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl p-8 text-center hover:bg-blue-50/50 dark:hover:bg-gray-800/50 transition-all relative cursor-pointer group">
+            <input type="file" accept=".csv" @change="onFileChange" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" />
+            <div v-if="!importFile" class="group-hover:scale-105 transition-transform duration-300">
+              <div class="text-4xl mb-2 opacity-60">📄</div>
+              <p class="text-gray-600 dark:text-gray-300 font-medium text-sm">{{ $t('users.modal.file_label') }}</p>
+              <p class="text-xs text-gray-400 mt-1">{{ $t('users.modal.file_limit_info') }}</p>
+            </div>
+            <div v-else class="relative z-20 text-green-600 dark:text-green-400">
+              <div class="text-4xl mb-2">✅</div>
+              <p class="font-medium text-sm">{{ importFile.name }}</p>
+              <button @click.stop="importFile = null" class="text-xs text-red-500 hover:underline mt-2">Hapus</button>
+            </div>
+          </div>
+          <div class="flex flex-col sm:flex-row justify-between items-center gap-4 mt-6">
+            <button @click="downloadTemplate" class="text-blue-600 dark:text-blue-400 text-xs hover:underline flex items-center gap-1">⬇ {{ $t('users.download_template') }}</button>
+            <button @click="handleImport" :disabled="!importFile" class="bg-green-600 hover:bg-green-700 text-white px-6 py-2.5 rounded-lg text-sm font-medium disabled:opacity-50 transition-colors w-full sm:w-auto shadow-md">{{ $t('users.import_csv') }}</button>
+          </div>
+        </div>
+      </div>
+    </Transition>
+
+    <Transition enter-active-class="transition duration-400 cubic-bezier(0.16, 1, 0.3, 1)" enter-from-class="opacity-0 scale-95 translate-y-8" enter-to-class="opacity-100 scale-100 translate-y-0" leave-active-class="transition duration-300 ease-in" leave-from-class="opacity-100 scale-100" leave-to-class="opacity-0 scale-95 translate-y-8">
+      <div v-if="showViewModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
+        <div class="bg-white dark:bg-gray-800 rounded-[1.5rem] shadow-2xl border border-gray-100 dark:border-gray-700 w-full max-w-sm pointer-events-auto overflow-hidden">
+          <div class="bg-gray-50 dark:bg-gray-800/50 px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
+            <h3 class="font-bold text-gray-800 dark:text-white text-sm">{{ $t('users.modal.detail_title') }}</h3>
+            <button @click="closeModals" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">✕</button>
+          </div>
+          <div class="p-6 text-center">
+            <div class="w-16 h-16 bg-gray-100 dark:bg-gray-700 rounded-full mx-auto mb-4 overflow-hidden border-2 border-white dark:border-gray-600 flex items-center justify-center text-xl font-bold text-gray-400 dark:text-gray-300 shadow-sm">
+              <img v-if="selectedUser?.photoProfile" :src="selectedUser.photoProfile" class="w-full h-full object-cover" />
+              <span v-else>{{ selectedUser?.name?.charAt(0).toUpperCase() }}</span>
+            </div>
+            <h2 class="text-lg font-bold text-gray-900 dark:text-white">{{ selectedUser?.name }}</h2>
+            <p class="text-xs text-gray-500 dark:text-gray-400 mb-4">{{ selectedUser?.email }}</p>
+            <div class="flex justify-center gap-2 text-[10px]">
+              <span class="px-2.5 py-1 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded-lg border border-blue-100 dark:border-blue-800 capitalize font-semibold">{{ selectedUser?.role?.name }}</span>
+              <span class="px-2.5 py-1 rounded-lg border capitalize font-semibold" :class="(selectedUser?.isActive ?? true) ? 'bg-green-50 dark:bg-green-900/30 text-green-700 dark:text-green-300 border-green-100 dark:border-green-800' : 'bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-300 border-red-100 dark:border-red-800'">
+                {{ (selectedUser?.isActive ?? true) ? $t('users.status.active') : $t('users.status.locked') }}
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Transition>
+
+    <Transition enter-active-class="transition duration-400 cubic-bezier(0.16, 1, 0.3, 1)" enter-from-class="opacity-0 scale-95 translate-y-8" enter-to-class="opacity-100 scale-100 translate-y-0" leave-active-class="transition duration-300 ease-in" leave-from-class="opacity-100 scale-100" leave-to-class="opacity-0 scale-95 translate-y-8">
+      <div v-if="showEditModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
+        <div class="bg-white dark:bg-gray-900 rounded-[1.5rem] shadow-2xl border border-gray-100 dark:border-gray-800 w-full max-w-md pointer-events-auto overflow-hidden relative">
+          <div class="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-blue-500 to-cyan-500"></div>
+          <div class="px-6 py-5 border-b border-gray-100 dark:border-gray-800 flex justify-between items-center">
+            <h3 class="text-lg font-bold text-gray-900 dark:text-white">{{ $t('users.modal.edit_title') }}</h3>
+            <button @click="closeModals" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">✕</button>
+          </div>
+          <form @submit.prevent="handleUpdateUser" class="p-6 space-y-4">
+            <div><label class="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1.5 uppercase tracking-wide">{{ $t('users.modal.name_label') }}</label><input v-model="form.name" required class="w-full px-4 py-2.5 bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/40 transition-all text-sm" /></div>
+            <div><label class="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1.5 uppercase tracking-wide">{{ $t('users.modal.email_label') }}</label><input v-model="form.email" type="email" required class="w-full px-4 py-2.5 bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/40 transition-all text-sm" /></div>
+            <div><label class="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1.5 uppercase tracking-wide">{{ $t('users.modal.password_new_label') }}</label><input v-model="form.password" type="password" class="w-full px-4 py-2.5 bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/40 transition-all text-sm" /></div>
+            <div><label class="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1.5 uppercase tracking-wide">{{ $t('users.modal.role_label') }}</label><div class="relative"><select v-model="form.roleId" class="w-full px-4 py-2.5 bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/40 transition-all appearance-none text-sm"><option :value="1">Admin</option><option :value="2">Editor</option><option :value="3">Viewer</option></select><div class="absolute inset-y-0 right-0 flex items-center px-4 pointer-events-none text-gray-500"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg></div></div></div>
+            <div class="pt-2 flex gap-3"><button type="button" @click="closeModals" class="flex-1 py-2.5 border border-gray-200 dark:border-gray-700 rounded-lg font-medium text-gray-600 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-800 transition text-sm">{{ $t('common.cancel') }}</button><button type="submit" class="flex-1 py-2.5 bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700 text-white font-semibold rounded-lg shadow-md transition-all transform hover:-translate-y-0.5 text-sm">{{ $t('common.save') }}</button></div>
+          </form>
+        </div>
+      </div>
+    </Transition>
+
+    <Transition enter-active-class="transition duration-400 cubic-bezier(0.16, 1, 0.3, 1)" enter-from-class="opacity-0 scale-95 translate-y-8" enter-to-class="opacity-100 scale-100 translate-y-0" leave-active-class="transition duration-300 ease-in" leave-from-class="opacity-100 scale-100" leave-to-class="opacity-0 scale-95 translate-y-8">
+      <div v-if="showLockConfirm" class="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
+        <div class="bg-white dark:bg-gray-900 rounded-[1.5rem] shadow-2xl border border-gray-100 dark:border-gray-800 w-full max-w-sm pointer-events-auto p-6 text-center relative overflow-hidden">
+          <div class="absolute top-0 left-0 w-full h-1.5" :class="(selectedUser?.isActive ?? true) ? 'bg-red-500' : 'bg-green-500'"></div>
+          <div class="w-14 h-14 rounded-full flex items-center justify-center mx-auto mb-4 text-2xl shadow-sm" :class="(selectedUser?.isActive ?? true) ? 'bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400' : 'bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400'">{{ (selectedUser?.isActive ?? true) ? '🔒' : '🔓' }}</div>
+          <h3 class="font-bold text-lg text-gray-900 dark:text-white mb-2">{{ (selectedUser?.isActive ?? true) ? $t('users.modal.lock_title') : $t('users.modal.unlock_title') }}</h3>
+          <p class="text-xs text-gray-500 dark:text-gray-400 mb-6 leading-relaxed">{{ $t('users.modal.lock_desc') }}</p>
+          <div class="flex gap-3">
+            <button @click="closeModals" class="flex-1 py-2.5 border border-gray-200 dark:border-gray-700 rounded-lg font-medium text-gray-600 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-800 transition text-sm">{{ $t('common.cancel') }}</button>
+            <button @click="toggleUserLock" class="flex-1 py-2.5 text-white font-semibold rounded-lg shadow-md transition-all text-sm" :class="(selectedUser?.isActive ?? true) ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'">{{ $t('common.yes_continue') }}</button>
+          </div>
+        </div>
+      </div>
+    </Transition>
+
+    <Transition enter-active-class="transition duration-400 cubic-bezier(0.16, 1, 0.3, 1)" enter-from-class="opacity-0 scale-95 translate-y-8" enter-to-class="opacity-100 scale-100 translate-y-0" leave-active-class="transition duration-300 ease-in" leave-from-class="opacity-100 scale-100" leave-to-class="opacity-0 scale-95 translate-y-8">
+      <div v-if="showDeleteConfirm" class="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
+        <div class="bg-white dark:bg-gray-900 rounded-[1.5rem] shadow-2xl border border-gray-100 dark:border-gray-800 w-full max-w-sm pointer-events-auto p-6 text-center relative overflow-hidden">
+          <div class="absolute top-0 left-0 w-full h-1.5 bg-red-600"></div>
+          <div class="w-14 h-14 rounded-full bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 flex items-center justify-center mx-auto mb-4 text-2xl shadow-sm">🗑️</div>
+          <h3 class="font-bold text-lg text-gray-900 dark:text-white mb-2">{{ $t('users.modal.delete_title') }}</h3>
+          <p class="text-xs text-gray-500 dark:text-gray-400 mb-6 leading-relaxed">{{ $t('users.modal.delete_desc') }}</p>
+          <div class="flex gap-3">
+            <button @click="closeModals" class="flex-1 py-2.5 border border-gray-200 dark:border-gray-700 rounded-lg font-medium text-gray-600 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-800 transition text-sm">{{ $t('common.cancel') }}</button>
+            <button @click="handleDeleteUser" class="flex-1 py-2.5 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-lg shadow-md transition-all text-sm">{{ $t('common.yes_delete') }}</button>
+          </div>
+        </div>
+      </div>
+    </Transition>
+
+    <Transition enter-active-class="transition duration-400 cubic-bezier(0.16, 1, 0.3, 1)" enter-from-class="opacity-0 scale-95 translate-y-8" enter-to-class="opacity-100 scale-100 translate-y-0" leave-active-class="transition duration-300 ease-in" leave-from-class="opacity-100 scale-100" leave-to-class="opacity-0 scale-95 translate-y-8">
+      <div v-if="showBulkDeleteConfirm" class="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
+        <div class="bg-white dark:bg-gray-900 rounded-[1.5rem] shadow-2xl border border-gray-100 dark:border-gray-800 w-full max-w-sm pointer-events-auto p-6 text-center relative overflow-hidden">
+          <div class="absolute top-0 left-0 w-full h-1.5 bg-red-600"></div>
+          <div class="w-14 h-14 rounded-full bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 flex items-center justify-center mx-auto mb-4 text-2xl shadow-sm">🗑️</div>
+          <h3 class="font-bold text-lg text-gray-900 dark:text-white mb-2">{{ $t('users.modal.bulk_delete_title', { count: selectedUserIds.length }) }}</h3>
+          <p class="text-xs text-gray-500 dark:text-gray-400 mb-6 leading-relaxed">{{ $t('users.modal.bulk_delete_desc') }}</p>
+          <div class="flex gap-3">
+            <button @click="closeModals" class="flex-1 py-2.5 border border-gray-200 dark:border-gray-700 rounded-lg font-medium text-gray-600 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-800 transition text-sm">{{ $t('common.cancel') }}</button>
+            <button @click="handleBulkDelete" class="flex-1 py-2.5 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-lg shadow-md transition-all text-sm">{{ $t('common.delete_all') }}</button>
+          </div>
+        </div>
+      </div>
+    </Transition>
+
   </div>
 </template>
 
 <style scoped>
-/* Modern Animations */
-@keyframes fadeIn {
-  from { opacity: 0; transform: translateY(20px) scale(0.95); }
-  to { opacity: 1; transform: translateY(0) scale(1); }
-}
-
-@keyframes float-orb {
-  0%, 100% { transform: translateY(0) translateX(0) rotate(0deg); }
-  50% { transform: translateY(-40px) translateX(20px) rotate(5deg); }
-}
-
-@keyframes pulse-glow {
-  0%, 100% { opacity: 0.2; transform: scale(1); }
-  50% { opacity: 0.4; transform: scale(1.05); }
-}
-
-@keyframes slide-up { from { opacity: 0; transform: translateY(30px); } to { opacity: 1; transform: translateY(0); } }
-@keyframes slide-down { from { opacity: 0; transform: translateY(-30px); } to { opacity: 1; transform: translateY(0); } }
-@keyframes shake { 0%,100%{transform:translateX(0)} 10%,30%,50%,70%,90%{transform:translateX(-8px)} 20%,40%,60%,80%{transform:translateX(8px)} }
-
-@keyframes float-particle {
-  0%, 100% { transform: translateY(0) translateX(0) rotate(0deg); opacity: 0.2; }
-  25% { transform: translateY(-50px) translateX(20px) rotate(90deg); opacity: 0.4; }
-  50% { transform: translateY(-100px) translateX(-20px) rotate(180deg); opacity: 0.2; }
-  75% { transform: translateY(-50px) translateX(10px) rotate(270deg); opacity: 0.4; }
-}
-
-.animate-fade-in-up { animation: fadeIn 1s cubic-bezier(0.22, 0.61, 0.36, 1) forwards; }
-.animate-fade-in-down { animation: slide-down 1s cubic-bezier(0.22, 0.61, 0.36, 1) forwards; }
-.animate-float-orb { animation: float-orb 28s ease-in-out infinite; }
-.animate-pulse-glow { animation: pulse-glow 12s ease-in-out infinite; }
-.animate-slide-up { animation: slide-up 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
-.animate-slide-down { animation: slide-down 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
-.animate-shake { animation: shake 0.6s ease-out; }
-.animate-float-particle { animation: float-particle linear infinite; }
-
-.delay-100 { animation-delay: 0.1s; }
-.delay-200 { animation-delay: 0.2s; }
-.delay-300 { animation-delay: 0.3s; }
-.delay-400 { animation-delay: 0.4s; }
-.delay-500 { animation-delay: 0.5s; }
-.delay-3000 { animation-delay: 3s; }
-
-.fade-enter-active, .fade-leave-active { transition: all 0.3s ease; }
-.fade-enter-from, .fade-leave-to { opacity: 0; transform: translateY(-10px); }
-.slide-down-enter-active, .slide-down-leave-active { transition: all 0.3s ease; }
-.slide-down-enter-from, .slide-down-leave-to { opacity: 0; transform: translateY(-10px); }
-
-* { transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
-
-/* Custom scrollbar */
-::-webkit-scrollbar { width: 6px; }
-::-webkit-scrollbar-track { background: rgba(0, 0, 0, 0.05); }
-::-webkit-scrollbar-thumb { background: linear-gradient(to bottom, #3b82f6, #06b6d4); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: linear-gradient(to bottom, #2563eb, #0891b2); }
+.animate-soft-slide-down { animation: softSlideDown 0.8s cubic-bezier(0.16, 1, 0.3, 1) backwards; }
+.animate-soft-slide-up { animation: softSlideUp 0.8s cubic-bezier(0.16, 1, 0.3, 1) backwards; }
+@keyframes softSlideDown { from { opacity: 0; transform: translateY(-20px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes softSlideUp { from { opacity: 0; transform: translateY(30px) scale(0.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
 </style>
