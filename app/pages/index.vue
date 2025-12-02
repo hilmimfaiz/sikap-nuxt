@@ -2,7 +2,7 @@
 // 1. Konfigurasi
 definePageMeta({
   layout: 'default',
-  middleware: 'auth' // Sesuaikan jika halaman ini seharusnya publik
+  middleware: 'auth' // Gunakan guest agar jika sudah login diarahkan ke dashboard
 })
 
 // Gunakan useI18n untuk reaktivitas bahasa
@@ -11,7 +11,7 @@ const { t } = useI18n()
 // 2. Fetch Data Tautan Penting (Hanya yang Active dari API Landing)
 const { data: importantLinks } = await useFetch('/api/landing/links')
 
-// 3. Data Fitur (Reactive dengan computed)
+// 3. Data Fitur (Reactive dengan computed agar berubah saat bahasa diganti)
 const features = computed(() => [
   {
     title: t('landing.features.archive.title'),
@@ -127,7 +127,7 @@ const getCategoryColor = (id: number) => {
             class="hidden sm:inline-block px-6 py-2.5 bg-gradient-to-r from-gray-900 to-gray-800 dark:from-white dark:to-gray-100 text-white dark:text-gray-900 font-medium rounded-full hover:shadow-2xl transition-all duration-300 shadow-lg hover:-translate-y-0.5 active:scale-95 ml-2 group overflow-hidden relative"
           >
             <span class="relative z-10">{{ t('landing.login_btn') }}</span>
-            <div class="absolute inset-0 bg-gradient-to-r from-blue-600 to-indigo-600 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+            <div class="absolute inset-0 bg-gradient-to-r from-blue-600 to-cyan-600 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
           </NuxtLink>
         </div>
       </div>
@@ -146,7 +146,7 @@ const getCategoryColor = (id: number) => {
           :class="headerVisible ? 'translate-y-0 opacity-100' : 'translate-y-4 opacity-0'"
         >
           <span class="w-2 h-2 bg-blue-500 rounded-full mr-2 animate-ping absolute"></span>
-          <span class="relative">🚀 {{ t('landing.badge') }}</span>
+          <span class="relative"> {{ t('landing.badge') }}</span>
         </div>
         
         <h1 
@@ -154,7 +154,7 @@ const getCategoryColor = (id: number) => {
           :class="headerVisible ? 'translate-y-0 opacity-100' : 'translate-y-8 opacity-0'"
         >
           {{ t('landing.hero_title_1') }} <br class="hidden md:block" />
-          <span class="text-transparent bg-clip-text bg-gradient-to-r from-blue-600 via-purple-600 to-indigo-600 animate-gradient-x">
+          <span class="text-transparent bg-clip-text bg-gradient-to-r from-blue-600 via-cyan-600 to-blue-600 animate-gradient-x">
             {{ t('landing.hero_title_2') }}
           </span>
         </h1>
@@ -172,13 +172,13 @@ const getCategoryColor = (id: number) => {
         >
           <NuxtLink 
             to="/login" 
-            class="group relative px-8 py-4 bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-semibold rounded-2xl shadow-2xl shadow-blue-500/30 transition-all duration-500 hover:-translate-y-1 hover:shadow-3xl overflow-hidden"
+            class="group relative px-8 py-4 bg-gradient-to-r from-blue-600 to-cyan-600 text-white font-semibold rounded-2xl shadow-2xl shadow-blue-500/30 transition-all duration-500 hover:-translate-y-1 hover:shadow-3xl overflow-hidden"
           >
             <span class="relative z-10 flex items-center justify-center">
               {{ t('landing.cta_primary') }}
               <span class="ml-2 group-hover:translate-x-1 transition-transform duration-300">→</span>
             </span>
-            <div class="absolute inset-0 bg-gradient-to-r from-indigo-600 to-purple-600 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+            <div class="absolute inset-0 bg-gradient-to-r from-blue-600 to-cyan-600 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
             <div class="absolute inset-0 bg-white/10 transform -skew-x-12 -translate-x-full group-hover:translate-x-full transition-transform duration-1000"></div>
           </NuxtLink>
           
@@ -259,13 +259,13 @@ const getCategoryColor = (id: number) => {
             class="text-3xl md:text-4xl font-bold text-gray-900 dark:text-white mb-4 transition-all duration-700"
             :class="linksVisible ? 'translate-y-0 opacity-100' : 'translate-y-8 opacity-0'"
           >
-            🔗 Tautan Penting
+            {{ t('landing.links_title') }}
           </h2>
           <p 
             class="text-gray-500 dark:text-gray-400 transition-all duration-700 delay-100"
             :class="linksVisible ? 'translate-y-0 opacity-100' : 'translate-y-8 opacity-0'"
           >
-            Akses cepat ke sumber daya dan informasi terkait
+            {{ t('landing.links_subtitle') }}
           </p>
         </div>
 
@@ -337,9 +337,9 @@ const getCategoryColor = (id: number) => {
                     </svg>
                  </div>
                  <p class="leading-relaxed">
-                    No. 01, Km. X, Jl. W.R. Supratman, Air Raja,<br>
-                    Kec. Tanjungpinang Timur, Kota Tanjung Pinang,<br>
-                    Kepulauan Riau 29125
+                   {{ $t('landing.footer_address_1') }}<br>
+                   {{ $t('landing.footer_address_2') }}<br>
+                   {{ $t('landing.footer_address_3') }}
                  </p>
               </div>
               <div class="flex items-center gap-3">
@@ -357,11 +357,11 @@ const getCategoryColor = (id: number) => {
         
         <div class="border-t border-gray-200/50 dark:border-gray-700/50 pt-8 flex flex-col md:flex-row justify-between items-center gap-4">
             <p class="text-gray-500 text-sm text-center md:text-left">
-              &copy; 2025 Sistem Informasi Kearsipan.
+              &copy; 2025 {{ $t('landing.footer_copyright') }}
             </p>
             <p class="text-gray-500 text-sm text-center md:text-right group">
-               <span class="inline-block group-hover:scale-110 transition-transform duration-300">Dibuat dengan Keamanan Tinggi</span> 
-               oleh @RiperHilmi.
+               <span class="inline-block group-hover:scale-110 transition-transform duration-300">{{ $t('landing.footer_made_by') }}</span> 
+               @RiperHilmi.
             </p>
         </div>
 

@@ -1,23 +1,55 @@
+import { PrismaClient } from '@prisma/client'
+
+const prisma = new PrismaClient()
+
 export default defineEventHandler(async (event) => {
+  const { search, page, limit } = getQuery(event)
+  
+  const searchQuery = search ? String(search) : ''
+  const pageNumber = page ? parseInt(String(page)) : 1
+  const limitNumber = limit ? parseInt(String(limit)) : 10
+  const skip = (pageNumber - 1) * limitNumber
+
   try {
-    const categories = await prisma.category.findMany({
-      include: {
-        // [FIX] Hapus 'archives: true' karena relasinya sudah dihapus dari schema
-        _count: {
-          select: { 
-            links: true // Hanya hitung jumlah link
-          }
-        },
-        inCharge: {
-          select: { name: true, email: true }
-        }
-      },
-      orderBy: { name: 'asc' }
+    // Kondisi Pencarian
+    const whereCondition: any = {}
+    
+    if (searchQuery) {
+      whereCondition.OR = [
+        { name: { contains: searchQuery } },
+        // Cari juga berdasarkan nama Penanggung Jawab
+        { inCharge: { name: { contains: searchQuery } } }
+      ]
+    }
+
+    // Hitung Total
+    const totalCount = await prisma.category.count({
+      where: whereCondition
     })
-    return categories
+
+    // Ambil Data
+    const categories = await prisma.category.findMany({
+      where: whereCondition,
+      include: {
+        inCharge: { select: { id: true, name: true } }, // Ambil nama PIC
+        _count: { select: { links: true } } // Hitung jumlah link (opsional, untuk info)
+      },
+      orderBy: { name: 'asc' },
+      skip: skip,
+      take: limitNumber
+    })
+
+    return {
+      data: categories,
+      meta: {
+        total: totalCount,
+        page: pageNumber,
+        limit: limitNumber,
+        totalPages: Math.ceil(totalCount / limitNumber)
+      }
+    }
+
   } catch (error) {
-    // Log error detail ke terminal server untuk debugging
-    console.error('Error fetching categories:', error)
-    throw createError({ statusCode: 500, message: 'Gagal mengambil kategori' })
+    throw createError({ statusCode: 500, message: 'Gagal mengambil data kategori' })
   }
 })

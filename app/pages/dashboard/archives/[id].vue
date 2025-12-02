@@ -1,6 +1,5 @@
-
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -16,9 +15,12 @@ const { startLoading, stopLoading } = useGlobalLoading()
 const toast = useToast()
 const { t } = useI18n()
 
-// --- STATE ---
-const folder = ref<any>(null)
-const loading = ref(false)
+// --- STATE PAGINATION & SEARCH ---
+const search = ref('')
+const page = ref(1)
+const limit = ref(10)
+
+// --- STATE DATA ---
 const allUsers = ref<any[]>([]) 
 
 // Modal States
@@ -27,102 +29,162 @@ const showRenameModal = ref(false)
 const showDeleteFolderConfirm = ref(false)
 const showDeleteFileConfirm = ref(false)
 const showShareFileModal = ref(false)
-const showShareFolderModal = ref(false) // <--- NEW: State Modal Share Folder
+const showShareFolderModal = ref(false)
+const showBulkDeleteConfirm = ref(false)
 
 // Forms & Data Holders
 const newFolderName = ref('')
 const selectedFile = ref<any>(null)
-const shareFileUserIds = ref<number[]>([]) // ID user yang dishare file
-const shareFolderUserIds = ref<number[]>([]) // <--- NEW: ID user yang dishare folder
+const shareFileUserIds = ref<number[]>([]) 
+const shareFolderUserIds = ref<number[]>([])
+const selectedFileIds = ref<number[]>([]) 
 
 const uploadForm = ref({
   file: null as File | null,
   title: ''
 })
 
+// Animation Trigger
+const isVisible = ref(false)
+onMounted(() => {
+  setTimeout(() => {
+    isVisible.value = true
+  }, 100)
+})
+
 // --- DATA FETCHING ---
-const refreshData = async () => {
-  try {
-    // Diasumsikan endpoint ini juga memuat folder.shares dan archives.fileShares
-    const folderData = await $fetch(`/api/folders/${folderId}`)
-    folder.value = folderData
-  } catch (e) {
-    // Gunakan e.data?.message jika tersedia, jika tidak gunakan fallback
-    toast.error(t('archives.messages.folder_not_found') || 'Folder tidak ditemukan')
-    router.push('/dashboard/archives')
+const { data: response, pending, refresh, error } = await useFetch(`/api/folders/${folderId}`, {
+  query: { page, limit, search },
+  watch: [page, search]
+})
+
+if (error.value) {
+  toast.error(t('archives.messages.folder_not_found') || 'Folder tidak ditemukan')
+  router.push('/dashboard/archives')
+}
+
+const folder = computed(() => response.value?.folder || null)
+const archives = computed(() => folder.value?.archives || [])
+const meta = computed(() => response.value?.meta || { total: 0, page: 1, limit: 10, totalPages: 1 })
+
+watch(search, () => {
+  page.value = 1
+  selectedFileIds.value = []
+})
+
+watch(page, () => {
+  selectedFileIds.value = []
+})
+
+const changePage = (newPage: number) => {
+  if (newPage >= 1 && newPage <= meta.value.totalPages) {
+    page.value = newPage
   }
 }
-await refreshData()
 
-// --- COMPUTED PERMISSIONS ---
+// --- FETCH USERS ---
+const fetchAllUsers = async () => {
+  if (allUsers.value.length > 0) return 
+
+  try {
+    const res: any = await $fetch('/api/users', { query: { limit: 1000 } })
+    const rawUsers = res.data || []
+    allUsers.value = rawUsers.filter((u: any) => u.id !== userCookie.value.id)
+  } catch (e) {
+    console.error(e)
+    toast.error(t('users.load_error') || 'Gagal memuat user')
+  }
+}
+
+// --- PERMISSIONS ---
 const canManage = computed(() => {
   if (!folder.value || !userCookie.value) return false
   return userCookie.value.role === 'admin' || folder.value.userId === userCookie.value.id
 })
 
+// --- SELECTION ---
+const isAllSelected = computed({
+  get: () => {
+    if (archives.value.length === 0) return false
+    const manageableFiles = archives.value.filter(() => canManage.value)
+    return manageableFiles.length > 0 && manageableFiles.every((f: any) => selectedFileIds.value.includes(f.id))
+  },
+  set: (val) => {
+    if (val && canManage.value) {
+      selectedFileIds.value = archives.value.map((f: any) => f.id)
+    } else {
+      selectedFileIds.value = []
+    }
+  }
+})
+
+const toggleSelection = (id: number) => {
+  if (selectedFileIds.value.includes(id)) {
+    selectedFileIds.value = selectedFileIds.value.filter(i => i !== id)
+  } else {
+    selectedFileIds.value.push(id)
+  }
+}
+
 // --- HELPER ---
 const closeModals = () => {
   showUploadModal.value = false; showRenameModal.value = false; showDeleteFolderConfirm.value = false
   showDeleteFileConfirm.value = false; showShareFileModal.value = false
-  showShareFolderModal.value = false // <--- UPDATED: Tutup modal share folder
+  showShareFolderModal.value = false; showBulkDeleteConfirm.value = false
   
   newFolderName.value = ''; selectedFile.value = null; shareFileUserIds.value = []
-  shareFolderUserIds.value = [] // <--- UPDATED: Reset state share folder
+  shareFolderUserIds.value = []
   uploadForm.value = { file: null, title: '' }
 }
 
 const getDownloadUrl = (filePath: string) => filePath
 
 // --- ACTIONS: FOLDER ---
+const openRename = () => { 
+  if (!folder.value) return
+  newFolderName.value = folder.value.name
+  showRenameModal.value = true 
+}
 
-const openRename = () => { newFolderName.value = folder.value.name; showRenameModal.value = true }
-const handleRename = async () => { /* ... kode rename ... */ }
-const handleDeleteFolder = async () => { /* ... kode delete folder ... */ }
+const handleRename = async () => {
+  if (!newFolderName.value.trim()) return
+  startLoading(t('archives.messages.rename_process'))
+  try {
+    await $fetch(`/api/folders/${folderId}`, { method: 'PUT', body: { name: newFolderName.value } })
+    await refresh()
+    closeModals(); await stopLoading(); toast.success(t('archives.messages.rename_success'))
+  } catch (e) { await stopLoading(); toast.error(t('archives.messages.rename_error')) }
+}
 
-// [NEW] Buka Modal Share Folder
+const handleDeleteFolder = async () => {
+  startLoading(t('archives.messages.delete_process'))
+  try {
+    await $fetch(`/api/folders/${folderId}`, { method: 'DELETE' })
+    await stopLoading(); toast.success(t('archives.messages.delete_success'))
+    router.push('/dashboard/archives')
+  } catch (e) { await stopLoading(); toast.error(t('archives.messages.delete_error')) }
+}
+
 const openShareFolderModal = async () => {
   if (!canManage.value) return; 
-  
-  startLoading(t('common.loading') || 'Memuat daftar pengguna...')
-
-  // 1. Muat daftar semua user (hanya sekali)
-  if (allUsers.value.length === 0) {
-    const { data } = await useFetch('/api/users')
-    // Filter user diri sendiri dari daftar share
-    allUsers.value = (data.value || []).filter((u: any) => u.id !== userCookie.value.id) 
-  }
-  
-  // 2. Set isi checkbox dengan user yang sudah dishare folder
+  startLoading(t('common.loading'))
+  await fetchAllUsers()
   shareFolderUserIds.value = (folder.value.shares || []).map((s: any) => s.userId)
-
   await stopLoading()
   showShareFolderModal.value = true
 }
 
-// [NEW] Eksekusi Share Folder
 const handleShareFolder = async () => {
   if (!folder.value) return
-  startLoading('Membagikan Folder...')
-  
+  startLoading(t('archives.messages.share_folder_process'))
   try {
-    await $fetch('/api/folders/share', {
-      method: 'POST',
-      body: {
-        folderId: folder.value.id,
-        targetUserIds: shareFolderUserIds.value
-      }
-    })
-    await refreshData() 
-    closeModals(); await stopLoading()
-    toast.success('Akses folder berhasil dibagikan!')
-  } catch (e) {
-    await stopLoading()
-    toast.error(e.data?.message || 'Gagal membagikan folder.')
-  }
+    await $fetch('/api/folders/share', { method: 'POST', body: { folderId: folder.value.id, targetUserIds: shareFolderUserIds.value } })
+    await refresh() 
+    closeModals(); await stopLoading(); toast.success(t('archives.messages.share_folder_success'))
+  } catch (e: any) { await stopLoading(); toast.error(e.data?.message || t('archives.messages.share_folder_error')) }
 }
 
-// --- ACTIONS: FILE (UPLOAD, SHARE, DELETE) ---
-
+// --- ACTIONS: FILE ---
 const onFileChange = (e: any) => {
   const file = e.target.files[0]
   if (file) {
@@ -134,21 +196,17 @@ const onFileChange = (e: any) => {
 
 const handleUpload = async () => {
   if (!uploadForm.value.file) return toast.warning(t('archives.messages.upload_error'))
-
   startLoading(t('archives.messages.upload_process'))
   const formData = new FormData()
   formData.append('file', uploadForm.value.file)
   formData.append('title', uploadForm.value.title || uploadForm.value.file.name)
   formData.append('folderId', folderId)
   formData.append('uploaderId', userCookie.value?.id)
-
   try {
     await $fetch('/api/archives/upload', { method: 'POST', body: formData })
-    await refreshData()
+    await refresh() 
     closeModals(); await stopLoading(); toast.success(t('archives.messages.upload_success'))
-  } catch (e) {
-    await stopLoading(); toast.error(t('archives.messages.upload_error'))
-  }
+  } catch (e) { await stopLoading(); toast.error(t('archives.messages.upload_error')) }
 }
 
 const confirmDeleteFile = (file: any) => { selectedFile.value = file; showDeleteFileConfirm.value = true }
@@ -157,386 +215,401 @@ const handleDeleteFile = async () => {
   startLoading(t('archives.messages.delete_file_process'))
   try {
     await $fetch(`/api/archives/${selectedFile.value.id}`, { method: 'DELETE' })
-    await refreshData()
+    await refresh()
     closeModals(); await stopLoading(); toast.success(t('archives.messages.delete_file_success'))
   } catch (e) { await stopLoading(); toast.error(t('archives.messages.delete_file_error')) }
 }
 
-// [FIX] Buka Modal Share File
 const openShareFileModal = async (file: any) => {
   if (!canManage.value) return; 
-  
-  startLoading(t('common.loading') || 'Memuat daftar pengguna...')
-
-  // 1. Muat daftar semua user (hanya sekali)
-  if (allUsers.value.length === 0) {
-    const { data } = await useFetch('/api/users')
-    allUsers.value = (data.value || []).filter((u: any) => u.id !== userCookie.value.id)
-  }
-  
-  // 2. Set file dan isi checkbox dengan user yang sudah dishare
+  startLoading(t('common.loading'))
+  await fetchAllUsers()
   selectedFile.value = file
   shareFileUserIds.value = (file.fileShares || []).map((s: any) => s.userId)
-
   await stopLoading()
   showShareFileModal.value = true
 }
 
-// [FIX] Eksekusi Share File
 const handleShareFile = async () => {
   if (!selectedFile.value) return
-  startLoading('Membagikan File...')
-  
+  startLoading(t('archives.messages.share_file_process'))
   try {
-    await $fetch('/api/archives/share', {
-      method: 'POST',
-      body: {
-        archiveId: selectedFile.value.id,
-        targetUserIds: shareFileUserIds.value
-      }
-    })
-    await refreshData() 
-    closeModals(); await stopLoading()
-    toast.success('Akses file berhasil dibagikan!')
-  } catch (e) {
-    await stopLoading()
-    toast.error(e.data?.message || 'Gagal membagikan file.')
-  }
+    await $fetch('/api/archives/share', { method: 'POST', body: { archiveId: selectedFile.value.id, targetUserIds: shareFileUserIds.value } })
+    await refresh() 
+    closeModals(); await stopLoading(); toast.success(t('archives.messages.share_file_success'))
+  } catch (e: any) { await stopLoading(); toast.error(e.data?.message || t('archives.messages.share_file_error')) }
+}
+
+const handleBulkDelete = async () => {
+  if (selectedFileIds.value.length === 0) return
+  startLoading(t('archives.messages.bulk_delete_process', { count: selectedFileIds.value.length }))
+  try {
+    await $fetch('/api/archives/bulk-delete', { method: 'POST', body: { ids: selectedFileIds.value } })
+    await refresh(); selectedFileIds.value = []; closeModals(); await stopLoading(); toast.success(t('archives.messages.bulk_delete_success'))
+  } catch (e: any) { await stopLoading(); toast.error(e.data?.message || t('archives.messages.bulk_delete_error')) }
 }
 </script>
 
 <template>
-  <div v-if="folder" class="min-h-screen bg-gradient-to-br from-slate-50 via-white to-indigo-50 dark:from-gray-950 dark:via-gray-900 dark:to-indigo-950/30 py-6 px-4 sm:px-6 lg:px-8 flex flex-col">
+  <div v-if="folder" class="min-h-screen bg-gradient-to-br from-blue-50 via-white to-cyan-50 dark:from-gray-950 dark:via-gray-900 dark:to-blue-950/20 py-6 px-4 sm:px-6 lg:px-8">
     
-    <div class="max-w-7xl mx-auto mb-6">
-      <NuxtLink to="/dashboard/archives" class="text-sm text-gray-600 dark:text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-400 flex items-center gap-2 mb-4 sm:mb-6 transition-all duration-300 hover:translate-x-1">
+    <div 
+      class="max-w-6xl mx-auto transition-all duration-700 ease-out"
+      :class="isVisible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'"
+    >
+      
+      <NuxtLink to="/dashboard/archives" class="text-xs sm:text-sm text-gray-500 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 flex items-center gap-2 mb-4 sm:mb-6 transition-all duration-300 hover:-translate-x-1 font-medium">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
         </svg>
         {{ $t('common.back') }}
       </NuxtLink>
       
-      <div class="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 sm:gap-6">
+      <div class="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 sm:gap-6 animate-soft-slide-down" style="animation-delay: 100ms;">
         <div class="flex items-center gap-3 sm:gap-4">
-          <div class="w-14 h-14 sm:w-16 sm:h-16 bg-gradient-to-br from-amber-400 to-orange-500 rounded-xl sm:rounded-2xl shadow-lg flex items-center justify-center transform transition-all duration-300 hover:scale-105">
-            <svg class="w-6 h-6 sm:w-8 sm:h-8 text-white" viewBox="0 0 24 24" fill="currentColor">
+          <div class="w-14 h-14 sm:w-16 sm:h-16 bg-gradient-to-br from-amber-400 to-orange-500 rounded-2xl shadow-lg flex items-center justify-center transform transition-all duration-300 hover:scale-105">
+            <svg class="w-7 h-7 sm:w-8 sm:h-8 text-white" viewBox="0 0 24 24" fill="currentColor">
               <path d="M19.5 21a3 3 0 0 0 3-3v-4.5a3 3 0 0 0-3-3h-15a3 3 0 0 0-3 3V18a3 3 0 0 0 3 3h15ZM1.5 10.146V6a3 3 0 0 1 3-3h5.379a2.25 2.25 0 0 1 1.59.659l2.122 2.121c.14.141.331.22.53.22H19.5a3 3 0 0 1 3 3v1.146A4.483 4.483 0 0 0 19.5 9h-15a4.483 4.483 0 0 0-3 1.146Z"/>
             </svg>
           </div>
           <div>
             <div class="flex items-center gap-2 sm:gap-3">
-              <h1 class="text-2xl sm:text-3xl font-extrabold bg-clip-text text-transparent bg-gradient-to-r from-indigo-600 to-purple-600">
+              <h1 class="text-2xl sm:text-3xl font-extrabold bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-cyan-600 dark:from-blue-400 dark:to-cyan-400">
                 {{ folder.name }}
               </h1>
-              <span v-if="!canManage" class="px-2 py-0.5 sm:px-3 sm:py-1 bg-indigo-100/80 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 rounded-full text-xs font-semibold backdrop-blur-sm">Shared</span>
+              <span v-if="!canManage" class="px-2 py-0.5 sm:px-3 sm:py-1 bg-blue-100/80 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 rounded-full text-[10px] sm:text-xs font-semibold backdrop-blur-sm">{{ $t('common.shared') }}</span>
             </div>
-            <div class="flex flex-wrap items-center gap-3 text-xs sm:text-sm text-gray-600 dark:text-gray-400 mt-1 sm:mt-2">
-              <span class="flex items-center gap-1 bg-white/50 dark:bg-gray-800/50 px-2 py-0.5 sm:px-3 sm:py-1 rounded-lg backdrop-blur-sm shadow-sm">
-                <svg class="w-3 h-3 sm:w-4 sm:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                </svg>
-                {{ folder.user?.name || 'Unknown' }}
+            <div class="flex flex-wrap items-center gap-2 sm:gap-3 text-xs text-gray-600 dark:text-gray-400 mt-1.5">
+              <span class="flex items-center gap-1 bg-white/60 dark:bg-gray-800/60 px-2 py-1 rounded-lg backdrop-blur-sm">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
+                {{ folder.user?.name || $t('common.unknown') }}
               </span>
-              <span class="flex items-center gap-1 bg-white/50 dark:bg-gray-800/50 px-2 py-0.5 sm:px-3 sm:py-1 rounded-lg backdrop-blur-sm shadow-sm">
-                <svg class="w-3 h-3 sm:w-4 sm:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-                </svg>
+              <span class="flex items-center gap-1 bg-white/60 dark:bg-gray-800/60 px-2 py-1 rounded-lg backdrop-blur-sm">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>
                 {{ folder._count?.archives || 0 }} {{ $t('archives.items') }}
               </span>
-              <span class="flex items-center gap-1 bg-white/50 dark:bg-gray-800/50 px-2 py-0.5 sm:px-3 sm:py-1 rounded-lg backdrop-blur-sm shadow-sm">
-                <svg class="w-3 h-3 sm:w-4 sm:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                </svg>
+              <span class="flex items-center gap-1 bg-white/60 dark:bg-gray-800/60 px-2 py-1 rounded-lg backdrop-blur-sm">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
                 {{ new Date(folder.createdAt).toLocaleDateString('id-ID') }}
               </span>
             </div>
           </div>
         </div>
 
-        <div v-if="canManage" class="flex items-center gap-2 sm:gap-3 w-full lg:w-auto mt-4 lg:mt-0">
-          <button 
-            @click="showUploadModal = true"
-            class="group relative overflow-hidden bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white font-medium px-4 py-2 sm:px-6 sm:py-3 rounded-xl shadow-lg hover:shadow-xl transition-all duration-300 flex items-center gap-1 sm:gap-2 text-xs sm:text-sm flex-1 lg:flex-none justify-center">
-            <svg class="w-4 h-4 sm:w-5 sm:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-            </svg>
-            {{ $t('common.upload') }}
-            <div class="absolute inset-0 bg-white/20 -translate-x-full group-hover:translate-x-full transition-transform duration-700"></div>
-          </button>
+        <div class="flex flex-col sm:flex-row items-center gap-3 w-full lg:w-auto mt-2 lg:mt-0">
+          
+          <transition enter-active-class="transition duration-200 ease-out" enter-from-class="opacity-0 scale-90" enter-to-class="opacity-100 scale-100" leave-active-class="transition duration-150 ease-in" leave-from-class="opacity-100 scale-100" leave-to-class="opacity-0 scale-90">
+            <button 
+              v-if="selectedFileIds.length > 0"
+              @click="showBulkDeleteConfirm = true"
+              class="bg-red-600 hover:bg-red-700 text-white px-5 py-2.5 rounded-xl flex items-center justify-center gap-2 shadow-lg hover:shadow-xl transition-all text-sm font-medium w-full sm:w-auto"
+            >
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+              {{ $t('common.delete') }} ({{ selectedFileIds.length }})
+            </button>
+          </transition>
 
-          <div class="flex bg-white/70 dark:bg-gray-900/70 backdrop-blur-xl border border-white/20 dark:border-gray-800/50 rounded-xl shadow-lg overflow-hidden flex-1 lg:flex-none">
-            <button @click="openShareFolderModal" class="px-3 py-2 sm:px-4 sm:py-3 text-gray-700 dark:text-gray-300 hover:bg-indigo-500/10 dark:hover:bg-indigo-900/20 hover:text-indigo-600 dark:hover:text-indigo-400 transition-all duration-300 hover:scale-110" title="Bagikan Folder">
-              <svg class="w-4 h-4 sm:w-5 sm:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.102 1.101" />
-              </svg>
+          <div class="relative w-full sm:w-60">
+            <input 
+              v-model="search" 
+              type="text" 
+              :placeholder="$t('common.search') || 'Cari file...'" 
+              class="w-full pl-9 pr-4 py-2.5 rounded-xl border border-blue-100 dark:border-gray-700 bg-white/80 dark:bg-gray-800/80 text-gray-700 dark:text-gray-200 focus:ring-2 focus:ring-blue-500 outline-none transition-all shadow-sm backdrop-blur-sm text-sm placeholder-gray-400"
+            />
+            <svg class="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+            </svg>
+          </div>
+
+          <div v-if="canManage" class="flex items-center gap-2 w-full sm:w-auto">
+            <button 
+              @click="showUploadModal = true"
+              class="group relative overflow-hidden bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700 text-white font-medium px-4 py-2 sm:px-6 sm:py-3 rounded-xl shadow-lg hover:shadow-xl transition-all duration-300 flex items-center justify-center gap-2 text-sm flex-1 sm:flex-none">
+              <svg class="w-4 h-4 sm:w-5 sm:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" /></svg>
+              {{ $t('common.upload') }}
+              <div class="absolute inset-0 bg-white/20 -translate-x-full group-hover:translate-x-full transition-transform duration-700"></div>
             </button>
-            
-            <button @click="openRename" class="px-3 py-2 sm:px-4 sm:py-3 text-gray-700 dark:text-gray-300 hover:bg-amber-500/10 dark:hover:bg-amber-900/20 hover:text-amber-600 dark:hover:text-amber-400 transition-all duration-300 hover:scale-110 border-l border-white/20 dark:border-gray-800/50" :title="$t('archives.modal.rename_title')">
-              <svg class="w-4 h-4 sm:w-5 sm:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
-              </svg>
+
+            <div class="flex bg-white/70 dark:bg-gray-900/70 backdrop-blur-xl border border-blue-100 dark:border-gray-800/50 rounded-xl shadow-md overflow-hidden flex-1 sm:flex-none justify-center">
+              <button @click="openShareFolderModal" class="px-3 py-2.5 text-gray-600 dark:text-gray-300 hover:bg-blue-500/10 dark:hover:bg-blue-900/20 hover:text-blue-600 dark:hover:text-blue-400 transition-all duration-300 hover:scale-110" :title="$t('common.share')">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.102 1.101" /></svg>
+              </button>
+              <button @click="openRename" class="px-3 py-2.5 text-gray-600 dark:text-gray-300 hover:bg-amber-500/10 dark:hover:bg-amber-900/20 hover:text-amber-600 dark:hover:text-amber-400 transition-all duration-300 hover:scale-110 border-l border-blue-100 dark:border-gray-800/50" :title="$t('archives.modal.rename_title')">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+              </button>
+              <button @click="showDeleteFolderConfirm = true" class="px-3 py-2.5 text-gray-600 dark:text-gray-300 hover:bg-red-500/10 dark:hover:bg-red-900/20 hover:text-red-600 dark:hover:text-red-400 transition-all duration-300 hover:scale-110 border-l border-blue-100 dark:border-gray-800/50" :title="$t('archives.modal.delete_title')">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2.5 2.5 0 0116.138 21H7.862a2.5 2.5 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1H9a1 1 0 00-1 1v3M4 7h16"/></svg>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="bg-white/80 dark:bg-gray-900/80 backdrop-blur-2xl rounded-2xl shadow-xl border border-blue-100 dark:border-gray-800/50 overflow-hidden flex flex-col animate-soft-slide-up" style="animation-delay: 200ms;">
+        <div class="overflow-x-auto flex-1">
+          <table class="min-w-full divide-y divide-blue-50 dark:divide-gray-800">
+            <thead>
+              <tr class="bg-gradient-to-r from-blue-600/5 to-cyan-500/5 dark:from-blue-500/10 dark:to-cyan-500/10 text-gray-600 dark:text-gray-300 uppercase text-xs font-bold">
+                <th v-if="canManage" class="px-6 py-4 w-10 text-center">
+                   <input type="checkbox" v-model="isAllSelected" class="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600" />
+                </th>
+                <th class="px-6 py-4 text-left">{{ $t('archives.table.name') }}</th>
+                <th class="px-6 py-4 text-left">{{ $t('archives.table.uploader') }}</th>
+                <th class="px-6 py-4 text-left">{{ $t('archives.table.size') }}</th>
+                <th class="px-6 py-4 text-center">{{ $t('archives.table.action') }}</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-blue-50 dark:divide-gray-800">
+              <tr v-if="pending">
+                <td :colspan="canManage ? 5 : 4" class="px-6 py-16 text-center text-gray-400 dark:text-gray-500">
+                  <div class="flex justify-center items-center gap-2">
+                    <div class="animate-spin w-5 h-5 border-2 border-blue-500 border-t-transparent rounded-full"></div>
+                    <span class="text-sm font-medium">{{ $t('common.loading') }}</span>
+                  </div>
+                </td>
+              </tr>
+
+              <tr v-else-if="archives.length === 0">
+                <td :colspan="canManage ? 5 : 4" class="px-6 py-16 text-center text-gray-500 dark:text-gray-400">
+                  <div class="w-14 h-14 mx-auto mb-3 opacity-50 animate-pulse bg-blue-50 dark:bg-gray-800 rounded-full flex items-center justify-center">
+                    <svg class="w-7 h-7 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 7h18M3 12h18M3 17h18"/></svg>
+                  </div>
+                  <p class="text-sm font-medium">{{ search ? $t('archives.table.empty_folder') : $t('archives.table.empty_folder') }}</p>
+                </td>
+              </tr>
+              
+              <tr v-for="file in archives" :key="file.id" class="hover:bg-blue-50/50 dark:hover:bg-blue-900/10 transition-all duration-300 group">
+                <td v-if="canManage" class="px-6 py-4 text-center">
+                   <input type="checkbox" :checked="selectedFileIds.includes(file.id)" @change="toggleSelection(file.id)" class="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600" />
+                </td>
+
+                <td class="px-6 py-4">
+                  <div class="flex items-center gap-3 group-hover:translate-x-1 transition-transform duration-200">
+                    <div class="w-9 h-9 bg-gradient-to-br from-emerald-400 to-teal-500 rounded-lg shadow-sm flex items-center justify-center text-white shrink-0">
+                      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" /></svg>
+                    </div>
+                    <div>
+                      <p class="font-semibold text-gray-900 dark:text-white text-sm group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">{{ file.title }}</p>
+                      <p class="text-[10px] text-gray-500 dark:text-gray-400 uppercase tracking-wide">{{ file.fileType }}</p>
+                    </div>
+                  </div>
+                </td>
+                
+                <td class="px-6 py-4">
+                  <div class="flex items-center gap-2">
+                    <div class="w-7 h-7 rounded-full bg-gradient-to-br from-blue-500 to-cyan-600 text-white text-[10px] font-bold flex items-center justify-center shadow-sm">
+                      {{ file.uploader?.name?.charAt(0).toUpperCase() || 'U' }}
+                    </div>
+                    <div>
+                      <p class="text-xs font-medium text-gray-700 dark:text-gray-300">{{ file.uploader?.name }}</p>
+                      <p class="text-[10px] text-gray-500 dark:text-gray-400">{{ new Date(file.createdAt).toLocaleDateString('id-ID') }}</p>
+                    </div>
+                  </div>
+                </td>
+
+                <td class="px-6 py-4">
+                  <span class="inline-flex px-2.5 py-1 rounded-lg text-[10px] font-semibold bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-700">
+                    {{ (file.fileSize / 1024).toFixed(0) }} KB
+                  </span>
+                </td>
+                
+                <td class="px-6 py-4 text-center">
+                  <div v-if="canManage" class="flex justify-center gap-2 opacity-80 group-hover:opacity-100 transition-opacity">
+                    <a :href="getDownloadUrl(file.filePath)" target="_blank" download class="p-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-600 dark:bg-emerald-900/20 dark:text-emerald-400 dark:hover:bg-emerald-900/40 rounded-lg transition-all hover:scale-110 shadow-sm border border-emerald-100 dark:border-emerald-800/30" :title="$t('common.download')">
+                      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                    </a>
+                    
+                    <button @click="openShareFileModal(file)" class="p-2 bg-blue-50 hover:bg-blue-100 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400 dark:hover:bg-blue-900/40 rounded-lg transition-all hover:scale-110 shadow-sm border border-blue-100 dark:border-blue-800/30" :title="$t('common.share')">
+                      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.102 1.101" /></svg>
+                    </button>
+
+                    <button @click="confirmDeleteFile(file)" class="p-2 bg-red-50 hover:bg-red-100 text-red-600 dark:bg-red-900/20 dark:text-red-400 dark:hover:bg-red-900/40 rounded-lg transition-all hover:scale-110 shadow-sm border border-red-100 dark:border-red-800/30" :title="$t('common.delete')">
+                      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2.5 2.5 0 0116.138 21H7.862a2.5 2.5 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1H9a1 1 0 00-1 1v3M4 7h16" /></svg>
+                    </button>
+                  </div>
+                  <span v-else class="text-[10px] text-gray-400 italic">{{ $t('common.read_only') }}</span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div v-if="meta.totalPages > 1" class="px-6 py-4 border-t border-blue-100 dark:border-gray-700/50 flex flex-col sm:flex-row justify-between items-center gap-4 bg-blue-50/30 dark:bg-gray-800/30">
+          <span class="text-xs text-gray-500 dark:text-gray-400 font-medium">
+            {{ $t('archives.pagination.showing', { start: (meta.page - 1) * limit + 1, end: Math.min(meta.page * limit, meta.total), total: meta.total }) }}
+          </span>
+
+          <div class="flex items-center gap-2">
+            <button 
+              @click="changePage(meta.page - 1)" 
+              :disabled="meta.page === 1"
+              class="p-2 rounded-lg border border-blue-200 dark:border-gray-600 hover:bg-blue-50 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-gray-600 dark:text-gray-300"
+            >
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
             </button>
-            <button @click="showDeleteFolderConfirm = true" class="px-3 py-2 sm:px-4 sm:py-3 text-gray-700 dark:text-gray-300 hover:bg-red-500/10 dark:hover:bg-red-900/20 hover:text-red-600 dark:hover:text-red-400 transition-all duration-300 hover:scale-110 border-l border-white/20 dark:border-gray-800/50" :title="$t('archives.modal.delete_title')">
-              <svg class="w-4 h-4 sm:w-5 sm:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2.5 2.5 0 0116.138 21H7.862a2.5 2.5 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1H9a1 1 0 00-1 1v3M4 7h16"/>
-              </svg>
+
+            <span class="text-xs font-semibold text-gray-700 dark:text-gray-300 mx-2">
+              {{ $t('archives.pagination.page', { current: meta.page, total: meta.totalPages }) }}
+            </span>
+
+            <button 
+              @click="changePage(meta.page + 1)" 
+              :disabled="meta.page === meta.totalPages"
+              class="p-2 rounded-lg border border-blue-200 dark:border-gray-600 hover:bg-blue-50 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-gray-600 dark:text-gray-300"
+            >
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
             </button>
           </div>
         </div>
       </div>
     </div>
 
-    <div class="max-w-7xl mx-auto bg-white/70 dark:bg-gray-900/70 backdrop-blur-2xl rounded-2xl shadow-xl border border-white/20 dark:border-gray-800/50 overflow-hidden flex-1">
-      <div class="overflow-x-auto">
-        <table class="min-w-full divide-y divide-gray-200/50 dark:divide-gray-800">
-          <thead>
-            <tr class="bg-gradient-to-r from-indigo-600/10 to-purple-600/10 dark:from-indigo-500/5 dark:to-purple-500/5 text-gray-700 dark:text-gray-300 uppercase text-xs font-bold">
-              <th class="px-4 py-3 sm:px-6 sm:py-4 text-left">{{ $t('archives.table.name') }}</th>
-              <th class="px-4 py-3 sm:px-6 sm:py-4 text-left">{{ $t('archives.table.uploader') }}</th>
-              <th class="px-4 py-3 sm:px-6 sm:py-4 text-left">{{ $t('archives.table.size') }}</th>
-              <th class="px-4 py-3 sm:px-6 sm:py-4 text-right">{{ $t('archives.table.action') }}</th>
-            </tr>
-          </thead>
-          <tbody class="divide-y divide-gray-200/50 dark:divide-gray-800">
-            <tr v-if="folder.archives.length === 0">
-              <td colspan="4" class="px-4 py-12 sm:px-6 sm:py-20 text-center text-gray-500 dark:text-gray-400">
-                <div class="w-16 h-16 sm:w-20 sm:h-20 mx-auto mb-3 sm:mb-4 opacity-50 animate-pulse">
-                  <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 7h18M3 12h18M3 17h18"/>
-                  </svg>
-                </div>
-                <p class="text-sm sm:text-base font-medium">{{ $t('archives.table.empty_folder') }}</p>
-              </td>
-            </tr>
-            
-            <tr v-for="file in folder.archives" :key="file.id" class="hover:bg-white/50 dark:hover:bg-gray-800/50 transition-all duration-300 group">
-              <td class="px-4 py-4 sm:px-6 sm:py-5">
-                <div class="flex items-center gap-2 sm:gap-3 group-hover:translate-x-1 transition-transform duration-200">
-                  <div class="w-8 h-8 sm:w-10 sm:h-10 bg-gradient-to-br from-emerald-400 to-teal-500 rounded-lg shadow-md flex items-center justify-center text-white">
-                    <svg class="w-4 h-4 sm:w-5 sm:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
-                    </svg>
-                  </div>
-                  <div>
-                    <p class="font-semibold text-gray-900 dark:text-white text-sm sm:text-base group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">{{ file.title }}</p>
-                    <p class="text-xs text-gray-500 dark:text-gray-400">{{ file.fileType }}</p>
-                  </div>
-                </div>
-              </td>
-              
-              <td class="px-4 py-4 sm:px-6 sm:py-5">
-                <div class="flex items-center gap-2 sm:gap-3">
-                  <div class="w-7 h-7 sm:w-9 sm:h-9 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 text-white text-xs font-bold flex items-center justify-center shadow-md">
-                    {{ file.uploader?.name?.charAt(0).toUpperCase() || 'U' }}
-                  </div>
-                  <div>
-                    <p class="text-xs sm:text-sm font-medium text-gray-700 dark:text-gray-300">{{ file.uploader?.name }}</p>
-                    <p class="text-xs text-gray-500 dark:text-gray-400">{{ new Date(file.createdAt).toLocaleDateString('id-ID') }}</p>
-                  </div>
-                </div>
-              </td>
-
-              <td class="px-4 py-4 sm:px-6 sm:py-5">
-                <span class="inline-flex px-2 py-0.5 sm:px-3 sm:py-1 rounded-full text-xs font-semibold bg-gradient-to-r from-gray-100 to-gray-200 dark:from-gray-800 dark:to-gray-700 text-gray-800 dark:text-gray-300 shadow-sm">
-                  {{ (file.fileSize / 1024).toFixed(0) }} KB
-                </span>
-              </td>
-              
-              <td class="px-4 py-4 sm:px-6 sm:py-5 text-right">
-                <div class="flex justify-end gap-2 sm:gap-3 flex-wrap">
-                  <a :href="getDownloadUrl(file.filePath)" target="_blank" download class="group relative overflow-hidden bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white px-3 py-1.5 sm:px-4 sm:py-2 rounded-lg shadow-md hover:shadow-lg transition-all duration-300 flex items-center gap-1 sm:gap-2 text-xs sm:text-sm">
-                    {{ $t('common.download') }}
-                    <svg class="w-3 h-3 sm:w-4 sm:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                    </svg>
-                    <div class="absolute inset-0 bg-white/20 -translate-x-full group-hover:translate-x-full transition-transform duration-700"></div>
-                  </a>
-                  
-                  <button 
-                    v-if="canManage"
-                    @click="openShareFileModal(file)"
-                    class="group relative overflow-hidden bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 text-white px-3 py-1.5 sm:px-4 sm:py-2 rounded-lg shadow-md hover:shadow-lg transition-all duration-300 flex items-center gap-1 sm:gap-2 text-xs sm:text-sm"
-                    title="Bagikan File"
-                  >
-                    Share
-                    <svg class="w-3 h-3 sm:w-4 sm:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.102 1.101" />
-                    </svg>
-                    <div class="absolute inset-0 bg-white/20 -translate-x-full group-hover:translate-x-full transition-transform duration-700"></div>
-                  </button>
-
-                  <button 
-                    v-if="canManage"
-                    @click="confirmDeleteFile(file)"
-                    class="group relative overflow-hidden bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700 text-white px-3 py-1.5 sm:px-4 sm:py-2 rounded-lg shadow-md hover:shadow-lg transition-all duration-300 flex items-center gap-1 sm:gap-2 text-xs sm:text-sm"
-                    :title="$t('common.delete')"
-                  >
-                    {{ $t('common.delete') }}
-                    <svg class="w-3 h-3 sm:w-4 sm:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2.5 2.5 0 0116.138 21H7.862a2.5 2.5 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                    </svg>
-                    <div class="absolute inset-0 bg-white/20 -translate-x-full group-hover:translate-x-full transition-transform duration-700"></div>
-                  </button>
-                </div>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
-
-    <!-- Backdrop -->
-    <Transition enter-active-class="transition duration-300" enter-from-class="opacity-0" enter-to-class="opacity-100" leave-active-class="transition duration-200" leave-from-class="opacity-100" leave-to-class="opacity-0">
-      <div v-if="showUploadModal || showRenameModal || showDeleteFolderConfirm || showDeleteFileConfirm || showShareFileModal || showShareFolderModal" class="fixed inset-0 bg-black/60 backdrop-blur-md z-40" @click="closeModals"></div>
+    <Transition enter-active-class="transition duration-300 ease-out" enter-from-class="opacity-0" enter-to-class="opacity-100" leave-active-class="transition duration-200 ease-in" leave-from-class="opacity-100" leave-to-class="opacity-0">
+      <div v-if="showUploadModal || showRenameModal || showDeleteFolderConfirm || showDeleteFileConfirm || showShareFileModal || showShareFolderModal || showBulkDeleteConfirm" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-40" @click="closeModals"></div>
     </Transition>
 
-    <!-- Modal Upload -->
-    <Transition enter-active-class="transition duration-400 ease-out" enter-from-class="opacity-0 scale-95" enter-to-class="opacity-100 scale-100" leave-active-class="transition duration-300 ease-in" leave-from-class="opacity-100 scale-100" leave-to-class="opacity-0 scale-95">
-      <div v-if="showUploadModal" class="fixed inset-0 z-50 flex items-center justify-center p-4">
-        <div class="bg-white/90 dark:bg-gray-900/90 backdrop-blur-2xl rounded-2xl shadow-2xl border border-white/20 dark:border-gray-700/50 w-full max-w-sm sm:max-w-md p-5 sm:p-6">
-          <div class="flex justify-between items-center mb-4 sm:mb-5">
-            <h3 class="text-lg sm:text-xl font-bold text-gray-900 dark:text-white">Upload File</h3>
-            <button @click="showUploadModal = false" class="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition-all duration-200 hover:scale-110">✕</button>
+    <Transition enter-active-class="transition duration-400 cubic-bezier(0.16, 1, 0.3, 1)" enter-from-class="opacity-0 scale-95 translate-y-8" enter-to-class="opacity-100 scale-100 translate-y-0" leave-active-class="transition duration-300 ease-in" leave-from-class="opacity-100 scale-100 translate-y-0" leave-to-class="opacity-0 scale-95 translate-y-8">
+      <div v-if="showUploadModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
+        <div class="bg-white dark:bg-gray-900 rounded-[1.5rem] shadow-2xl border border-gray-100 dark:border-gray-800 w-full max-w-sm sm:max-w-md p-6 relative pointer-events-auto overflow-hidden">
+          <div class="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-blue-500 to-cyan-500"></div>
+          <div class="flex justify-between items-center mb-5">
+            <h3 class="text-lg font-bold text-gray-900 dark:text-white">{{ $t('archives.modal.upload_title') }}</h3>
+            <button @click="showUploadModal = false" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg></button>
           </div>
-          <form @submit.prevent="handleUpload" class="space-y-3 sm:space-y-4">
+          <form @submit.prevent="handleUpload" class="space-y-4">
             <div>
-              <label class="block text-xs sm:text-sm font-medium mb-1 sm:mb-2 text-gray-700 dark:text-gray-300">{{ $t('archives.modal.file_label') }}</label>
-              <div class="border-2 border-dashed border-gray-300/60 dark:border-gray-600/60 rounded-xl p-4 sm:p-6 text-center hover:bg-gray-50/50 dark:hover:bg-gray-800/50 transition-all duration-300 relative backdrop-blur-sm">
+              <label class="block text-xs font-semibold mb-1.5 text-gray-600 dark:text-gray-300 uppercase">{{ $t('archives.modal.file_label') }}</label>
+              <div class="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl p-6 text-center hover:bg-gray-50/50 dark:hover:bg-gray-800/50 transition relative cursor-pointer">
                 <input type="file" @change="onFileChange" required class="absolute inset-0 w-full h-full opacity-0 cursor-pointer"/>
-                <div v-if="!uploadForm.file" class="text-gray-500 dark:text-gray-400 text-xs sm:text-sm">Drag & drop atau klik untuk pilih file (max 5MB)</div>
+                <div v-if="!uploadForm.file" class="text-gray-500 dark:text-gray-400 text-xs sm:text-sm">{{ $t('archives.modal.file_placeholder') }}</div>
                 <div v-else class="flex flex-col items-center">
-                  <svg class="w-6 h-6 sm:w-8 sm:h-8 text-green-500 mb-1 sm:mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5h6a2 2 0 012 2v10a2 2 0 01-2 2H9a2 2 0 01-2-2V7a2 2 0 012-2z" />
-                  </svg>
-                  <span class="text-green-600 dark:text-green-400 text-xs sm:text-sm font-medium">{{ uploadForm.file.name }}</span>
-                  <p class="text-xs text-gray-400 mt-0.5 sm:mt-1">{{ (uploadForm.file.size / 1024).toFixed(1) }} KB</p>
+                  <svg class="w-6 h-6 text-green-500 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5h6a2 2 0 012 2v10a2 2 0 01-2 2H9a2 2 0 01-2-2V7a2 2 0 012-2z"/></svg>
+                  <span class="text-green-600 dark:text-green-400 text-xs font-medium truncate max-w-[200px]">{{ uploadForm.file.name }}</span>
+                  <p class="text-[10px] text-gray-400 mt-0.5">{{ (uploadForm.file.size / 1024).toFixed(1) }} KB</p>
                 </div>
               </div>
             </div>
             <div>
-              <label class="block text-xs sm:text-sm font-medium mb-1 sm:mb-2 text-gray-700 dark:text-gray-300">{{ $t('archives.modal.title_label') }}</label>
-              <input v-model="uploadForm.title" type="text" class="w-full px-3 py-2 sm:px-4 sm:py-3 bg-gray-50/70 dark:bg-gray-800/70 border border-gray-300/60 dark:border-gray-600/60 rounded-lg focus:ring-2 focus:ring-indigo-500/50 transition-all duration-300 text-xs sm:text-sm" :placeholder="$t('archives.modal.title_placeholder')" />
+              <label class="block text-xs font-semibold mb-1.5 text-gray-600 dark:text-gray-300 uppercase">{{ $t('archives.modal.title_label') }}</label>
+              <input v-model="uploadForm.title" type="text" class="w-full px-4 py-2.5 bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/40 text-sm" :placeholder="$t('archives.modal.title_placeholder')" />
             </div>
             <div class="flex gap-2 sm:gap-3 mt-4 sm:mt-6">
-              <button type="button" @click="closeModals" class="flex-1 py-2 sm:py-2.5 border border-gray-300/60 dark:border-gray-600/60 rounded-lg hover:bg-gray-100/50 dark:hover:bg-gray-800/50 transition-all duration-300 text-xs sm:text-sm font-medium">Batal</button>
-              <button type="submit" class="flex-1 py-2 sm:py-2.5 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-lg shadow-md hover:shadow-lg transition-all duration-300 text-xs sm:text-sm font-medium">Upload</button>
+              <button type="button" @click="closeModals" class="flex-1 py-2.5 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition text-xs font-medium">{{ $t('common.cancel') }}</button>
+              <button type="submit" class="flex-1 py-2.5 bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700 text-white rounded-lg shadow-md transition text-xs font-medium">{{ $t('common.upload') }}</button>
             </div>
           </form>
         </div>
       </div>
     </Transition>
     
-    <!-- Modal Share File -->
-    <Transition enter-active-class="transition duration-400 ease-out" enter-from-class="opacity-0 scale-95" enter-to-class="opacity-100 scale-100" leave-active-class="transition duration-300 ease-in" leave-from-class="opacity-100 scale-100" leave-to-class="opacity-0 scale-95">
-      <div v-if="showShareFileModal" class="fixed inset-0 z-50 flex items-center justify-center p-4">
-        <div class="bg-white/90 dark:bg-gray-900/90 backdrop-blur-2xl rounded-2xl shadow-2xl border border-white/20 dark:border-gray-700/50 w-full max-w-sm sm:max-w-md p-5 sm:p-6 flex flex-col max-h-[80vh]">
-          <div class="flex justify-between items-center mb-4 sm:mb-5">
-            <h3 class="text-lg sm:text-xl font-bold text-gray-900 dark:text-white">Bagikan File: {{ selectedFile?.title }}</h3>
-            <button @click="showShareFileModal = false" class="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition-all duration-200 hover:scale-110">✕</button>
+    <Transition enter-active-class="transition duration-400 cubic-bezier(0.16, 1, 0.3, 1)" enter-from-class="opacity-0 scale-95 translate-y-8" enter-to-class="opacity-100 scale-100 translate-y-0" leave-active-class="transition duration-300 ease-in" leave-from-class="opacity-100 scale-100 translate-y-0" leave-to-class="opacity-0 scale-95 translate-y-8">
+      <div v-if="showShareFileModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
+        <div class="bg-white dark:bg-gray-900 rounded-[1.5rem] shadow-2xl border border-gray-100 dark:border-gray-800 w-full max-w-sm sm:max-w-md p-6 flex flex-col max-h-[80vh] relative pointer-events-auto overflow-hidden">
+          <div class="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-blue-500 to-cyan-500"></div>
+          <div class="flex justify-between items-center mb-4">
+            <h3 class="text-lg font-bold text-gray-900 dark:text-white truncate max-w-[80%]">{{ $t('archives.modal.share_file_title', { title: selectedFile?.title }) }}</h3>
+            <button @click="showShareFileModal = false" class="text-gray-400 hover:text-gray-600 transition"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg></button>
           </div>
-          <p class="text-xs sm:text-sm text-gray-600 dark:text-gray-400 mb-3 sm:mb-4">Pilih pengguna untuk akses unduh file ini.</p>
-          
-          <div class="flex-1 overflow-y-auto border border-gray-200/50 dark:border-gray-700/50 rounded-xl p-2 sm:p-3 mb-4 sm:mb-6 bg-white/50 dark:bg-gray-800/50 backdrop-blur-sm">
-            <div v-if="allUsers.length === 0" class="text-center py-4 sm:py-6 text-gray-500 dark:text-gray-400 italic text-xs sm:text-sm">Tidak ada pengguna lain.</div>
-            <label v-for="u in allUsers" :key="u.id" class="flex items-center gap-2 sm:gap-3 p-2 sm:p-3 hover:bg-white/80 dark:hover:bg-gray-800/80 rounded-lg cursor-pointer transition-all duration-300 hover:shadow-sm">
-              <input type="checkbox" :value="u.id" v-model="shareFileUserIds" class="w-4 h-4 sm:w-5 sm:h-5 text-indigo-600 rounded focus:ring-indigo-500/50 dark:bg-gray-700 border-gray-300 dark:border-gray-600 transition-all duration-200">
-              <div class="flex items-center gap-1 sm:gap-2">
-                <div class="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 text-white text-xs font-bold flex items-center justify-center shadow-sm">
-                  {{ u.name.charAt(0).toUpperCase() }}
-                </div>
-                <div>
-                  <div class="text-xs sm:text-sm font-medium text-gray-900 dark:text-white">{{ u.name }}</div>
-                  <div class="text-xs text-gray-500 capitalize">{{ u.role || 'user' }}</div>
-                </div>
+          <p class="text-xs text-gray-500 mb-4">{{ $t('archives.modal.share_file_desc') }}</p>
+          <div class="flex-1 overflow-y-auto border border-gray-100 dark:border-gray-800 rounded-xl p-2 mb-4 bg-gray-50/50 dark:bg-gray-800/30">
+            <div v-if="allUsers.length === 0" class="text-center py-4 text-gray-400 italic text-xs">{{ $t('archives.modal.no_users') }}</div>
+            <label v-for="u in allUsers" :key="u.id" class="flex items-center gap-3 p-2.5 hover:bg-white dark:hover:bg-gray-800 rounded-lg cursor-pointer transition border border-transparent hover:border-gray-100 dark:hover:border-gray-700">
+              <input type="checkbox" :value="u.id" v-model="shareFileUserIds" class="w-4 h-4 text-blue-600 rounded focus:ring-blue-500/50 border-gray-300">
+              <div class="flex items-center gap-2">
+                <div class="w-7 h-7 rounded-full bg-gradient-to-br from-blue-500 to-cyan-500 text-white text-[10px] font-bold flex items-center justify-center">{{ u.name.charAt(0).toUpperCase() }}</div>
+                <div><div class="text-xs font-medium text-gray-900 dark:text-white">{{ u.name }}</div><div class="text-[10px] text-gray-500 capitalize">{{ u.role || 'user' }}</div></div>
               </div>
             </label>
           </div>
-
-          <div class="flex gap-2 sm:gap-3">
-            <button @click="closeModals" class="flex-1 py-2 sm:py-2.5 border border-gray-300/60 dark:border-gray-600/60 rounded-lg hover:bg-gray-100/50 dark:hover:bg-gray-800/50 transition-all duration-300 text-xs sm:text-sm font-medium">Batal</button>
-            <button @click="handleShareFile" class="flex-1 py-2 sm:py-2.5 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-lg shadow-md hover:shadow-lg transition-all duration-300 text-xs sm:text-sm font-medium">Simpan</button>
+          <div class="flex gap-2">
+            <button @click="closeModals" class="flex-1 py-2.5 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition text-xs font-medium">{{ $t('common.cancel') }}</button>
+            <button @click="handleShareFile" class="flex-1 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg shadow-md transition text-xs font-medium">{{ $t('common.save') }}</button>
           </div>
         </div>
       </div>
     </Transition>
 
-    <!-- Modal Share Folder -->
-    <Transition enter-active-class="transition duration-400 ease-out" enter-from-class="opacity-0 scale-95" enter-to-class="opacity-100 scale-100" leave-active-class="transition duration-300 ease-in" leave-from-class="opacity-100 scale-100" leave-to-class="opacity-0 scale-95">
-      <div v-if="showShareFolderModal" class="fixed inset-0 z-50 flex items-center justify-center p-4">
-        <div class="bg-white/90 dark:bg-gray-900/90 backdrop-blur-2xl rounded-2xl shadow-2xl border border-white/20 dark:border-gray-700/50 w-full max-w-sm sm:max-w-md p-5 sm:p-6 flex flex-col max-h-[80vh]">
-          <div class="flex justify-between items-center mb-4 sm:mb-5">
-            <h3 class="text-lg sm:text-xl font-bold text-gray-900 dark:text-white">Bagikan Folder: {{ folder?.name }}</h3>
-            <button @click="showShareFolderModal = false" class="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition-all duration-200 hover:scale-110">✕</button>
+    <Transition enter-active-class="transition duration-400 cubic-bezier(0.16, 1, 0.3, 1)" enter-from-class="opacity-0 scale-95 translate-y-8" enter-to-class="opacity-100 scale-100 translate-y-0" leave-active-class="transition duration-300 ease-in" leave-from-class="opacity-100 scale-100 translate-y-0" leave-to-class="opacity-0 scale-95 translate-y-8">
+      <div v-if="showShareFolderModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
+        <div class="bg-white dark:bg-gray-900 rounded-[1.5rem] shadow-2xl border border-gray-100 dark:border-gray-800 w-full max-w-sm sm:max-w-md p-6 flex flex-col max-h-[80vh] relative pointer-events-auto overflow-hidden">
+          <div class="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-blue-500 to-cyan-500"></div>
+          <div class="flex justify-between items-center mb-4">
+            <h3 class="text-lg font-bold text-gray-900 dark:text-white truncate max-w-[80%]">{{ $t('archives.modal.share_folder_title', { name: folder?.name }) }}</h3>
+            <button @click="showShareFolderModal = false" class="text-gray-400 hover:text-gray-600 transition"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg></button>
           </div>
-          <p class="text-xs sm:text-sm text-gray-600 dark:text-gray-400 mb-3 sm:mb-4">Pilih pengguna untuk akses folder ini.</p>
-          
-          <div class="flex-1 overflow-y-auto border border-gray-200/50 dark:border-gray-700/50 rounded-xl p-2 sm:p-3 mb-4 sm:mb-6 bg-white/50 dark:bg-gray-800/50 backdrop-blur-sm">
-            <div v-if="allUsers.length === 0" class="text-center py-4 sm:py-6 text-gray-500 dark:text-gray-400 italic text-xs sm:text-sm">Tidak ada pengguna lain.</div>
-            <label v-for="u in allUsers" :key="u.id" class="flex items-center gap-2 sm:gap-3 p-2 sm:p-3 hover:bg-white/80 dark:hover:bg-gray-800/80 rounded-lg cursor-pointer transition-all duration-300 hover:shadow-sm">
-              <input type="checkbox" :value="u.id" v-model="shareFolderUserIds" class="w-4 h-4 sm:w-5 sm:h-5 text-indigo-600 rounded focus:ring-indigo-500/50 dark:bg-gray-700 border-gray-300 dark:border-gray-600 transition-all duration-200">
-              <div class="flex items-center gap-1 sm:gap-2">
-                <div class="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 text-white text-xs font-bold flex items-center justify-center shadow-sm">
-                  {{ u.name.charAt(0).toUpperCase() }}
-                </div>
-                <div>
-                  <div class="text-xs sm:text-sm font-medium text-gray-900 dark:text-white">{{ u.name }}</div>
-                  <div class="text-xs text-gray-500 capitalize">{{ u.role || 'user' }}</div>
-                </div>
+          <p class="text-xs text-gray-500 mb-4">{{ $t('archives.modal.share_folder_desc') }}</p>
+          <div class="flex-1 overflow-y-auto border border-gray-100 dark:border-gray-800 rounded-xl p-2 mb-4 bg-gray-50/50 dark:bg-gray-800/30">
+            <div v-if="allUsers.length === 0" class="text-center py-4 text-gray-400 italic text-xs">{{ $t('archives.modal.no_users') }}</div>
+            <label v-for="u in allUsers" :key="u.id" class="flex items-center gap-3 p-2.5 hover:bg-white dark:hover:bg-gray-800 rounded-lg cursor-pointer transition border border-transparent hover:border-gray-100 dark:hover:border-gray-700">
+              <input type="checkbox" :value="u.id" v-model="shareFolderUserIds" class="w-4 h-4 text-blue-600 rounded focus:ring-blue-500/50 border-gray-300">
+              <div class="flex items-center gap-2">
+                <div class="w-7 h-7 rounded-full bg-gradient-to-br from-blue-500 to-cyan-500 text-white text-[10px] font-bold flex items-center justify-center">{{ u.name.charAt(0).toUpperCase() }}</div>
+                <div><div class="text-xs font-medium text-gray-900 dark:text-white">{{ u.name }}</div><div class="text-[10px] text-gray-500 capitalize">{{ u.role || 'user' }}</div></div>
               </div>
             </label>
           </div>
-
-          <div class="flex gap-2 sm:gap-3">
-            <button @click="closeModals" class="flex-1 py-2 sm:py-2.5 border border-gray-300/60 dark:border-gray-600/60 rounded-lg hover:bg-gray-100/50 dark:hover:bg-gray-800/50 transition-all duration-300 text-xs sm:text-sm font-medium">Batal</button>
-            <button @click="handleShareFolder" class="flex-1 py-2 sm:py-2.5 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-lg shadow-md hover:shadow-lg transition-all duration-300 text-xs sm:text-sm font-medium">Simpan</button>
+          <div class="flex gap-2">
+            <button @click="closeModals" class="flex-1 py-2.5 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition text-xs font-medium">{{ $t('common.cancel') }}</button>
+            <button @click="handleShareFolder" class="flex-1 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg shadow-md transition text-xs font-medium">{{ $t('common.save') }}</button>
           </div>
         </div>
       </div>
     </Transition>
 
-    <!-- Modal Rename -->
-    <Transition enter-active-class="transition duration-400 ease-out" enter-from-class="opacity-0 scale-95" enter-to-class="opacity-100 scale-100" leave-active-class="transition duration-300 ease-in" leave-from-class="opacity-100 scale-100" leave-to-class="opacity-0 scale-95">
-      <div v-if="showRenameModal" class="fixed inset-0 z-50 flex items-center justify-center p-4">
-        <div class="bg-white/90 dark:bg-gray-900/90 backdrop-blur-2xl rounded-2xl shadow-2xl border border-white/20 dark:border-gray-700/50 w-full max-w-sm sm:max-w-md p-5 sm:p-6">
-          <h3 class="text-lg sm:text-xl font-bold mb-4 sm:mb-5 text-gray-900 dark:text-white">Ganti Nama Folder</h3>
-          <input v-model="newFolderName" type="text" class="w-full px-3 py-2 sm:px-4 sm:py-3 bg-gray-50/70 dark:bg-gray-800/70 border border-gray-300/60 dark:border-gray-600/60 rounded-lg focus:ring-2 focus:ring-amber-500/50 transition-all duration-300 text-xs sm:text-sm" autoFocus />
-          <div class="flex gap-2 sm:gap-3 mt-4 sm:mt-6">
-            <button @click="closeModals" class="flex-1 py-2 sm:py-2.5 border border-gray-300/60 dark:border-gray-600/60 rounded-lg hover:bg-gray-100/50 dark:hover:bg-gray-800/50 transition-all duration-300 text-xs sm:text-sm font-medium">Batal</button>
-            <button @click="handleRename" class="flex-1 py-2 sm:py-2.5 bg-gradient-to-r from-amber-600 to-orange-600 text-white rounded-lg shadow-md hover:shadow-lg transition-all duration-300 text-xs sm:text-sm font-medium">Simpan</button>
+    <Transition enter-active-class="transition duration-400 cubic-bezier(0.16, 1, 0.3, 1)" enter-from-class="opacity-0 scale-95 translate-y-8" enter-to-class="opacity-100 scale-100 translate-y-0" leave-active-class="transition duration-300 ease-in" leave-from-class="opacity-100 scale-100 translate-y-0" leave-to-class="opacity-0 scale-95 translate-y-8">
+      <div v-if="showRenameModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
+        <div class="bg-white dark:bg-gray-900 rounded-[1.5rem] shadow-2xl border border-gray-100 dark:border-gray-800 w-full max-w-sm sm:max-w-md p-6 relative pointer-events-auto overflow-hidden">
+          <div class="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-amber-500 to-orange-500"></div>
+          <h3 class="text-lg font-bold mb-5 text-gray-900 dark:text-white">{{ $t('archives.modal.rename_title') }}</h3>
+          <input v-model="newFolderName" type="text" class="w-full px-4 py-3 bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500/40 transition-all text-sm" autoFocus />
+          <div class="flex gap-3 mt-6">
+            <button @click="closeModals" class="flex-1 py-2.5 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition text-xs font-medium">{{ $t('common.cancel') }}</button>
+            <button @click="handleRename" class="flex-1 py-2.5 bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 text-white rounded-lg shadow-md transition text-xs font-medium">{{ $t('common.save') }}</button>
           </div>
         </div>
       </div>
     </Transition>
 
-    <!-- Modal Delete Folder -->
-    <Transition enter-active-class="transition duration-400 ease-out" enter-from-class="opacity-0 scale-95" enter-to-class="opacity-100 scale-100" leave-active-class="transition duration-300 ease-in" leave-from-class="opacity-100 scale-100" leave-to-class="opacity-0 scale-95">
-      <div v-if="showDeleteFolderConfirm" class="fixed inset-0 z-50 flex items-center justify-center p-4">
-        <div class="bg-white/90 dark:bg-gray-900/90 backdrop-blur-2xl rounded-2xl shadow-2xl border border-white/20 dark:border-gray-700/50 max-w-xs sm:max-w-sm w-full p-5 sm:p-6 text-center">
-          <div class="w-12 h-12 sm:w-14 sm:h-14 mx-auto mb-3 sm:mb-4 bg-red-100/80 dark:bg-red-900/40 rounded-full flex items-center justify-center text-2xl sm:text-3xl text-red-600 dark:text-red-400 animate-bounce">🗑️</div>
-          <h3 class="text-base sm:text-lg font-bold text-gray-900 dark:text-white mb-1 sm:mb-2">Hapus Folder?</h3>
-          <p class="text-xs sm:text-sm text-gray-600 dark:text-gray-300 mb-4 sm:mb-6">
-            Folder <strong class="text-red-600 dark:text-red-400">{{ folder?.name }}</strong> akan dihapus permanen beserta isinya.
-          </p>
-          <div class="flex gap-2 sm:gap-3">
-            <button @click="closeModals" class="flex-1 py-2 sm:py-2.5 border border-gray-300/60 dark:border-gray-600/60 rounded-lg hover:bg-gray-100/50 dark:hover:bg-gray-800/50 transition-all duration-300 text-xs sm:text-sm">Batal</button>
-            <button @click="handleDeleteFolder" class="flex-1 py-2 sm:py-2.5 bg-gradient-to-r from-red-600 to-rose-600 text-white rounded-lg shadow-md hover:shadow-lg transition-all duration-300 text-xs sm:text-sm font-medium">Hapus</button>
+    <Transition enter-active-class="transition duration-400 cubic-bezier(0.16, 1, 0.3, 1)" enter-from-class="opacity-0 scale-95 translate-y-8" enter-to-class="opacity-100 scale-100 translate-y-0" leave-active-class="transition duration-300 ease-in" leave-from-class="opacity-100 scale-100 translate-y-0" leave-to-class="opacity-0 scale-95 translate-y-8">
+      <div v-if="showDeleteFolderConfirm" class="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
+        <div class="bg-white dark:bg-gray-900 rounded-[1.5rem] shadow-2xl border border-gray-100 dark:border-gray-800 max-w-xs sm:max-w-sm w-full p-6 text-center relative pointer-events-auto overflow-hidden">
+          <div class="absolute top-0 left-0 w-full h-1.5 bg-red-500"></div>
+          <div class="w-14 h-14 mx-auto mb-4 bg-red-50 dark:bg-red-900/20 rounded-full flex items-center justify-center text-2xl text-red-600">🗑️</div>
+          <h3 class="text-lg font-bold text-gray-900 dark:text-white mb-2">{{ $t('archives.modal.delete_title') }}</h3>
+          <p class="text-xs text-gray-500 mb-6">{{ $t('archives.modal.delete_desc') }} <strong class="text-red-600">{{ folder?.name }}</strong></p>
+          <div class="flex gap-3">
+            <button @click="closeModals" class="flex-1 py-2.5 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition text-xs font-medium">{{ $t('common.cancel') }}</button>
+            <button @click="handleDeleteFolder" class="flex-1 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-lg shadow-md transition text-xs font-medium">{{ $t('common.delete') }}</button>
           </div>
         </div>
       </div>
     </Transition>
 
-    <!-- Modal Delete File -->
-    <Transition enter-active-class="transition duration-400 ease-out" enter-from-class="opacity-0 scale-95" enter-to-class="opacity-100 scale-100" leave-active-class="transition duration-300 ease-in" leave-from-class="opacity-100 scale-100" leave-to-class="opacity-0 scale-95">
-      <div v-if="showDeleteFileConfirm" class="fixed inset-0 z-50 flex items-center justify-center p-4">
-        <div class="bg-white/90 dark:bg-gray-900/90 backdrop-blur-2xl rounded-2xl shadow-2xl border border-white/20 dark:border-gray-700/50 max-w-xs sm:max-w-sm w-full p-5 sm:p-6 text-center">
-          <div class="w-12 h-12 sm:w-14 sm:h-14 mx-auto mb-3 sm:mb-4 bg-red-100/80 dark:bg-red-900/40 rounded-full flex items-center justify-center text-2xl sm:text-3xl text-red-600 dark:text-red-400 animate-bounce">📄</div>
-          <h3 class="text-base sm:text-lg font-bold text-gray-900 dark:text-white mb-1 sm:mb-2">Hapus File?</h3>
-          <p class="text-xs sm:text-sm text-gray-600 dark:text-gray-300 mb-4 sm:mb-6">
-            File <strong class="text-red-600 dark:text-red-400">{{ selectedFile?.title }}</strong> akan dihapus permanen.
-          </p>
-          <div class="flex gap-2 sm:gap-3">
-            <button @click="closeModals" class="flex-1 py-2 sm:py-2.5 border border-gray-300/60 dark:border-gray-600/60 rounded-lg hover:bg-gray-100/50 dark:hover:bg-gray-800/50 transition-all duration-300 text-xs sm:text-sm">Batal</button>
-            <button @click="handleDeleteFile" class="flex-1 py-2 sm:py-2.5 bg-gradient-to-r from-red-600 to-rose-600 text-white rounded-lg shadow-md hover:shadow-lg transition-all duration-300 text-xs sm:text-sm font-medium">Hapus</button>
+    <Transition enter-active-class="transition duration-400 cubic-bezier(0.16, 1, 0.3, 1)" enter-from-class="opacity-0 scale-95 translate-y-8" enter-to-class="opacity-100 scale-100 translate-y-0" leave-active-class="transition duration-300 ease-in" leave-from-class="opacity-100 scale-100 translate-y-0" leave-to-class="opacity-0 scale-95 translate-y-8">
+      <div v-if="showDeleteFileConfirm" class="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
+        <div class="bg-white dark:bg-gray-900 rounded-[1.5rem] shadow-2xl border border-gray-100 dark:border-gray-800 max-w-xs sm:max-w-sm w-full p-6 text-center relative pointer-events-auto overflow-hidden">
+          <div class="absolute top-0 left-0 w-full h-1.5 bg-red-500"></div>
+          <div class="w-14 h-14 mx-auto mb-4 bg-red-50 dark:bg-red-900/20 rounded-full flex items-center justify-center text-2xl text-red-600">📄</div>
+          <h3 class="text-lg font-bold text-gray-900 dark:text-white mb-2">{{ $t('archives.modal.delete_file_title') }}</h3>
+          <p class="text-xs text-gray-500 mb-6">{{ $t('archives.modal.delete_file_desc') }} <strong class="text-red-600">{{ selectedFile?.title }}</strong></p>
+          <div class="flex gap-3">
+            <button @click="closeModals" class="flex-1 py-2.5 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition text-xs font-medium">{{ $t('common.cancel') }}</button>
+            <button @click="handleDeleteFile" class="flex-1 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-lg shadow-md transition text-xs font-medium">{{ $t('common.delete') }}</button>
+          </div>
+        </div>
+      </div>
+    </Transition>
+
+     <Transition enter-active-class="transition duration-400 cubic-bezier(0.16, 1, 0.3, 1)" enter-from-class="opacity-0 scale-95 translate-y-8" enter-to-class="opacity-100 scale-100 translate-y-0" leave-active-class="transition duration-300 ease-in" leave-from-class="opacity-100 scale-100 translate-y-0" leave-to-class="opacity-0 scale-95 translate-y-8">
+      <div v-if="showBulkDeleteConfirm" class="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
+        <div class="bg-white dark:bg-gray-900 rounded-[1.5rem] shadow-2xl border border-gray-100 dark:border-gray-800 max-w-xs sm:max-w-sm w-full p-6 text-center relative pointer-events-auto overflow-hidden">
+          <div class="absolute top-0 left-0 w-full h-1.5 bg-red-600"></div>
+          <div class="w-14 h-14 mx-auto mb-4 bg-red-50 dark:bg-red-900/20 rounded-full flex items-center justify-center text-2xl text-red-600">🗑️</div>
+          <h3 class="text-lg font-bold text-gray-900 dark:text-white mb-2">{{ $t('archives.modal.bulk_delete_title', { n: selectedFileIds.length }) }}</h3>
+          <p class="text-xs text-gray-500 dark:text-gray-400 mb-6">{{ $t('archives.modal.bulk_delete_desc') }}</p>
+          <div class="flex gap-3">
+            <button @click="closeModals" class="flex-1 py-2.5 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-800 transition text-xs font-medium">{{ $t('common.cancel') }}</button>
+            <button @click="handleBulkDelete" class="flex-1 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-lg shadow-md transition text-xs font-medium transform hover:-translate-y-0.5">{{ $t('common.delete_all') }}</button>
           </div>
         </div>
       </div>
@@ -544,3 +617,10 @@ const handleShareFile = async () => {
 
   </div>
 </template>
+
+<style scoped>
+.animate-soft-slide-down { animation: softSlideDown 0.8s cubic-bezier(0.16, 1, 0.3, 1) backwards; }
+.animate-soft-slide-up { animation: softSlideUp 0.8s cubic-bezier(0.16, 1, 0.3, 1) backwards; }
+@keyframes softSlideDown { from { opacity: 0; transform: translateY(-20px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes softSlideUp { from { opacity: 0; transform: translateY(30px) scale(0.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
+</style>

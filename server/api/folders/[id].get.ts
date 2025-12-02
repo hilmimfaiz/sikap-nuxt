@@ -1,3 +1,7 @@
+import { PrismaClient } from '@prisma/client'
+
+const prisma = new PrismaClient()
+
 export default defineEventHandler(async (event) => {
   const idParam = getRouterParam(event, 'id')
   const userCookie = getCookie(event, 'user_data')
@@ -6,70 +10,96 @@ export default defineEventHandler(async (event) => {
 
   const user = JSON.parse(userCookie)
   const folderId = parseInt(idParam)
-  
-  // FIX: Pastikan user.id dari cookie di-parse sebagai integer untuk perbandingan ketat
   const currentUserId = user.id ? parseInt(user.id) : null 
 
-  if (!currentUserId) throw createError({ statusCode: 401, message: 'Unauthorized: User ID invalid' })
+  if (!currentUserId) throw createError({ statusCode: 401, message: 'Unauthorized' })
+
+  // --- 1. Ambil Parameter Pagination & Search ---
+  const { page, limit, search } = getQuery(event)
+  const pageNumber = page ? parseInt(String(page)) : 1
+  const limitNumber = limit ? parseInt(String(limit)) : 10
+  const skip = (pageNumber - 1) * limitNumber
+  const searchQuery = search ? String(search) : ''
 
   try {
-    const folder = await prisma.folder.findUnique({
+    // --- 2. Cek Eksistensi Folder & Hak Akses (Query Ringan) ---
+    const folderBasic = await prisma.folder.findUnique({
       where: { id: folderId },
       include: {
-        archives: {
-          include: {
-            uploader: { select: { name: true } },
-            // [PENTING] Ambil info sharing file untuk filtering
-            fileShares: { select: { userId: true } } 
-          },
-          orderBy: { createdAt: 'desc' }
-        },
-        user: { select: { id: true, name: true, email: true } }, // Owner
-        shares: { select: { userId: true } }, // Daftar User yang dishare folder ini
-        _count: { select: { archives: true } }
+        shares: { select: { userId: true } }
       }
     })
     
-    if (!folder) throw createError({ statusCode: 404, message: 'Folder tidak ditemukan' })
+    if (!folderBasic) throw createError({ statusCode: 404, message: 'Folder tidak ditemukan' })
 
-    // Cek Hak Akses Folder
-    const isOwner = folder.userId === currentUserId
+    const isOwner = folderBasic.userId === currentUserId
     const isAdmin = user.role === 'admin'
-    const isShared = folder.shares.some(s => s.userId === currentUserId)
+    const isShared = folderBasic.shares.some(s => s.userId === currentUserId)
 
-    // Jika user tidak memiliki salah satu akses di atas, tolak
     if (!isOwner && !isAdmin && !isShared) {
       throw createError({ statusCode: 403, message: 'Akses ditolak' })
     }
-    
-    // --- START: Implementasi Logika File Sharing Independen ---
-    
-    // Logika Filtering File: Hanya berlaku jika user BUKAN Owner dan BUKAN Admin
-    if (!isOwner && !isAdmin) {
-      // Filter archives: hanya tampilkan file yang di-share secara eksplisit ke user ini
-      folder.archives = folder.archives.filter(archive => {
-        // Cek apakah file ini di-share ke user saat ini
-        const isFileShared = archive.fileShares.some(s => s.userId === currentUserId)
-        
-        // Kembalikan file jika secara eksplisit di-share.
-        return isFileShared
-      })
+
+    // --- 3. Bangun Query Filter Arsip ---
+    const archiveWhere: any = {
+      folderId: folderId
     }
-    
-    // Hapus properti fileShares dari setiap arsip sebelum dikirim ke klien
-    // Ini agar data tetap bersih dan tidak bocor ke frontend.
-    // Kita harus membuat salinan objek karena properti yang di-select oleh Prisma bersifat Readonly/Immutable.
-    // @ts-ignore
-    folder.archives = folder.archives.map(archive => {
-        // Pisahkan fileShares (yang tidak dibutuhkan klien) dari data arsip
-        // @ts-ignore
-        const { fileShares, ...safeArchive } = archive 
-        return safeArchive
-    })
 
-    // --- END: Implementasi Logika File Sharing Independen ---
+    // A. Filter Search (Jika ada)
+    if (searchQuery) {
+      archiveWhere.OR = [
+        { title: { contains: searchQuery } },
+        { fileType: { contains: searchQuery } },
+        { uploader: { name: { contains: searchQuery } } }
+      ]
+    }
 
-    return folder
+    // B. Filter Hak Akses File (Jika user biasa & bukan owner folder)
+    if (!isOwner && !isAdmin) {
+      archiveWhere.fileShares = {
+        some: { userId: currentUserId }
+      }
+    }
+
+    // --- 4. Eksekusi Query (Transaction: Count & Data) ---
+    const [totalArchives, folderData] = await prisma.$transaction([
+      // Hitung total data sesuai filter (untuk pagination)
+      prisma.archive.count({ where: archiveWhere }),
+      
+      // Ambil data folder beserta arsip yang sudah dipaginasi
+      prisma.folder.findUnique({
+        where: { id: folderId },
+        include: {
+          archives: {
+            where: archiveWhere,
+            skip: skip,
+            take: limitNumber,
+            orderBy: { createdAt: 'desc' },
+            include: {
+              uploader: { select: { name: true } },
+              fileShares: { select: { userId: true } } // Diperlukan untuk logika frontend (checkbox share)
+            }
+          },
+          user: { select: { id: true, name: true, email: true } },
+          shares: { select: { userId: true } },
+          _count: { select: { archives: true } }
+        }
+      })
+    ])
+
+    if (!folderData) throw createError({ statusCode: 404, message: 'Folder data error' })
+
+    // --- 5. Return Response dengan Meta Pagination ---
+    return {
+      folder: folderData, // Folder object yang berisi arsip (halaman ini saja)
+      meta: {
+        total: totalArchives,
+        page: pageNumber,
+        limit: limitNumber,
+        totalPages: Math.ceil(totalArchives / limitNumber)
+      }
+    }
+
   } catch (error: any) {
     throw createError({ statusCode: error.statusCode || 500, message: error.message })
   }

@@ -1,4 +1,3 @@
-// https://nuxt.com/docs/api/configuration/nuxt-config
 export default defineNuxtConfig({
   // 1. Mode Kompatibilitas Nuxt 4
   future: {
@@ -16,20 +15,28 @@ export default defineNuxtConfig({
     '@nuxtjs/i18n'
   ],
 
-  // 3. Konfigurasi i18n
+  // 3. Konfigurasi i18n (FIXED)
   i18n: {
-    strategy: 'prefix_except_default',
+    // Menggunakan strategi 'no_prefix' agar URL tetap bersih 
+    // dan bahasa bergantung sepenuhnya pada cookie/state.
+    // Jika Anda ingin URL seperti /en/login, ubah kembali ke 'prefix_except_default'
+    strategy: 'no_prefix', 
+    
     defaultLocale: 'id',
-    lazy: false,
+    lazy: false, // Load semua locale di awal agar transisi instan
     langDir: 'locales',
     locales: [
       { code: 'id', name: 'Indonesia', file: 'id.json', iso: 'id-ID' },
       { code: 'en', name: 'English', file: 'en.json', iso: 'en-US' }
     ],
+    
+    // Konfigurasi deteksi bahasa yang lebih persisten
     detectBrowserLanguage: {
-      useCookie: true,
-      cookieKey: 'i18n_redirected',
-      redirectOn: 'root',
+      useCookie: true,            // Wajib true agar pilihan user tersimpan
+      cookieKey: 'i18n_redirected', // Nama cookie
+      redirectOn: 'root',         // Hanya redirect di root jika belum ada cookie
+      alwaysRedirect: false,      // PENTING: Set false agar tidak memaksa redirect setiap navigasi
+      fallbackLocale: 'id'
     }
   },
 
@@ -48,16 +55,14 @@ export default defineNuxtConfig({
     shim: false
   },
 
-  // [FIX] 7. Konfigurasi Vite untuk mengizinkan Ngrok
+  // 7. Konfigurasi Vite
   vite: {
     server: {
       allowedHosts: [
-        'adf2c3843988.ngrok-free.app', // Host spesifik Anda
+        'adf2c3843988.ngrok-free.app',
         'localhost',
         '127.0.0.1'
       ]
-      // Atau jika ingin mengizinkan semua (untuk dev):
-      // allowedHosts: true
     }
   }
 })

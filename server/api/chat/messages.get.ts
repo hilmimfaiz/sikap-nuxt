@@ -1,4 +1,5 @@
 import { PrismaClient } from '@prisma/client'
+
 const prisma = new PrismaClient()
 
 export default defineEventHandler(async (event) => {
@@ -6,27 +7,36 @@ export default defineEventHandler(async (event) => {
   if (!userCookie) throw createError({ statusCode: 401 })
   const currentUser = JSON.parse(userCookie)
 
-  const query = getQuery(event)
-  const partnerId = parseInt(query.partnerId as string)
+  const { partnerId } = getQuery(event)
 
   if (!partnerId) return []
 
-  // Ambil pesan antara user login dan partner
-  const messages = await prisma.message.findMany({
-    where: {
-      OR: [
-        { senderId: currentUser.id, receiverId: partnerId },
-        { senderId: partnerId, receiverId: currentUser.id }
-      ]
-    },
-    orderBy: { createdAt: 'asc' }
-  })
+  try {
+    const messages = await prisma.message.findMany({
+      where: {
+        OR: [
+          // Pesan yang SAYA kirim ke DIA
+          { senderId: currentUser.id, receiverId: parseInt(String(partnerId)) },
+          // Pesan yang DIA kirim ke SAYA
+          { senderId: parseInt(String(partnerId)), receiverId: currentUser.id }
+        ]
+      },
+      orderBy: {
+        createdAt: 'asc' // Urutkan dari yang terlama ke terbaru
+      },
+      include: {
+        sender: {
+          select: { id: true, name: true, photoProfile: true }
+        },
+        replyTo: {
+          select: { id: true, content: true, sender: { select: { name: true } } }
+        }
+      }
+    })
 
-  // Tandai pesan dari partner sebagai 'read' (dibaca)
-  await prisma.message.updateMany({
-    where: { senderId: partnerId, receiverId: currentUser.id, isRead: false },
-    data: { isRead: true }
-  })
-
-  return messages
+    return messages
+  } catch (error) {
+    console.error('Gagal mengambil pesan:', error)
+    return []
+  }
 })

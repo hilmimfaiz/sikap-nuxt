@@ -1,34 +1,40 @@
 import { PrismaClient } from '@prisma/client'
+
 const prisma = new PrismaClient()
 
 export default defineEventHandler(async (event) => {
+  // 1. Cek User Login
   const userCookie = getCookie(event, 'user_data')
-  if (!userCookie) throw createError({ statusCode: 401 })
+  if (!userCookie) throw createError({ statusCode: 401, statusMessage: 'Unauthorized' })
   const currentUser = JSON.parse(userCookie)
 
-  const id = event.context.params?.id
-  if (!id) throw createError({ statusCode: 400, message: 'ID pesan diperlukan' })
+  // 2. Ambil ID Pesan dari URL
+  const id = getRouterParam(event, 'id')
+  if (!id) throw createError({ statusCode: 400, statusMessage: 'ID Pesan diperlukan' })
 
   const messageId = parseInt(id)
 
-  // 1. Cek Pesan
+  // 3. Cari pesan di database
   const message = await prisma.message.findUnique({
     where: { id: messageId }
   })
 
-  if (!message) throw createError({ statusCode: 404, message: 'Pesan tidak ditemukan' })
-
-  // 2. Validasi Hak Akses
-  // Hanya pengirim pesan yang boleh menghapus pesannya sendiri
-  // (Opsional: Admin boleh menghapus pesan siapapun, tambahkan logika OR jika perlu)
-  if (message.senderId !== currentUser.id) {
-    throw createError({ statusCode: 403, message: 'Anda tidak berhak menghapus pesan ini' })
+  if (!message) {
+    throw createError({ statusCode: 404, statusMessage: 'Pesan tidak ditemukan' })
   }
 
-  // 3. Hapus Pesan
-  await prisma.message.delete({
-    where: { id: messageId }
-  })
+  // 4. Validasi: Hanya pengirim yang boleh menghapus
+  if (message.senderId !== currentUser.id) {
+    throw createError({ statusCode: 403, statusMessage: 'Anda tidak berhak menghapus pesan ini' })
+  }
 
-  return { success: true, message: 'Pesan dihapus' }
+  // 5. Hapus Pesan
+  try {
+    await prisma.message.delete({
+      where: { id: messageId }
+    })
+    return { success: true, message: 'Pesan berhasil dihapus' }
+  } catch (error) {
+    throw createError({ statusCode: 500, statusMessage: 'Gagal menghapus pesan' })
+  }
 })

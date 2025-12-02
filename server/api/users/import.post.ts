@@ -1,16 +1,19 @@
+import { PrismaClient } from '@prisma/client'
+
+const prisma = new PrismaClient()
+
 export default defineEventHandler(async (event) => {
   try {
-    // 1. Cek Hak Akses (Authorization)
+    // 1. Cek Hak Akses (Authorization) - Hanya Admin
     const userCookie = getCookie(event, 'user_data')
     if (!userCookie) {
-      throw createError({ statusCode: 401, message: 'Unauthorized: Silakan login terlebih dahulu.' })
+      throw createError({ statusCode: 401, message: 'Unauthorized: Silakan login.' })
     }
     
-    const user = JSON.parse(userCookie)
+    const currentUser = JSON.parse(userCookie)
 
-    // Proteksi: Viewer tidak boleh melakukan import
-    if (user.role === 'viewer') {
-      throw createError({ statusCode: 403, message: 'Akses ditolak: Viewer tidak memiliki izin import data.' })
+    if (currentUser.role !== 'admin') {
+      throw createError({ statusCode: 403, message: 'Akses ditolak. Hanya admin yang bisa import user.' })
     }
 
     // 2. Baca File Upload (Multipart)
@@ -22,84 +25,85 @@ export default defineEventHandler(async (event) => {
 
     const csvFile = files.find(f => f.name === 'file')
     
-    // Validasi ekstensi file
+    // Validasi file (Cek ekstensi .csv)
     if (!csvFile || !csvFile.filename?.toLowerCase().endsWith('.csv')) {
       throw createError({ statusCode: 400, message: 'Format file harus .csv' })
     }
 
     // 3. Parse Konten CSV
     const csvString = csvFile.data.toString('utf-8')
-    // Pisahkan baris (handle CRLF windows dan LF unix)
+    // Pisahkan baris (handle baris baru Windows CRLF dan Unix LF)
     const lines = csvString.split(/\r?\n/).filter(line => line.trim() !== '')
     
-    // Hapus baris pertama (Header: Title,Url,Category)
+    // Hapus baris pertama (Header: Name,Email,Password,Role)
     const dataRows = lines.slice(1)
     
     if (dataRows.length === 0) {
       throw createError({ statusCode: 400, message: 'File CSV kosong atau hanya berisi header.' })
     }
 
+    // Persiapan Mapping Role (Agar tidak hardcode ID)
+    const roles = await prisma.role.findMany()
+    const roleMap = new Map(roles.map(r => [r.name.toLowerCase(), r.id]))
+    
+    // Default role ID jika kosong/tidak valid (biasanya ID 3 = viewer)
+    const defaultRoleId = roleMap.get('viewer') || 3
+
     let successCount = 0
     let failCount = 0
 
     // 4. Loop dan Proses Data
     for (const row of dataRows) {
-      // Split berdasarkan koma (Simple CSV Parser)
-      // Note: Ini parser sederhana. Jika ada koma di dalam judul, struktur bisa bergeser.
+      // Split berdasarkan koma
       const cols = row.split(',').map(item => item?.trim())
 
-      // Pastikan minimal ada Title dan URL
-      if (cols.length < 2) {
+      // Validasi jumlah kolom minimal (Name, Email, Password)
+      if (cols.length < 3) {
         failCount++
         continue
       }
 
-      const title = cols[0]
-      const url = cols[1]
-      const categoryName = cols[2] // Opsional
+      const [name, email, password, roleName] = cols
 
-      if (!title || !url) {
+      // Validasi data wajib
+      if (!name || !email || !password) {
         failCount++
         continue
       }
 
       try {
-        // A. Logika Kategori (Cari atau Buat)
-        let categoryId: number
-        
-        // Jika kategori kosong di CSV, gunakan 'Umum'
-        const targetCategoryName = categoryName && categoryName !== '' ? categoryName : 'Umum'
-
-        // Cari kategori di DB (Case insensitive search simulation)
-        // Prisma SQLite/MySQL default behavior bisa beda, kita cari exact name dulu
-        let existingCat = await prisma.category.findFirst({
-          where: { name: targetCategoryName }
+        // Cek Email Duplikat
+        const existingUser = await prisma.user.findUnique({
+          where: { email }
         })
 
-        if (existingCat) {
-          categoryId = existingCat.id
-        } else {
-          // Jika belum ada, buat kategori baru
-          const newCat = await prisma.category.create({
-            data: { name: targetCategoryName }
-          })
-          categoryId = newCat.id
+        if (existingUser) {
+          failCount++ // Skip jika email sudah ada
+          continue
         }
 
-        // B. Simpan Link
-        await prisma.link.create({
+        // Tentukan Role ID
+        let roleId = defaultRoleId
+        if (roleName && roleMap.has(roleName.toLowerCase())) {
+          roleId = roleMap.get(roleName.toLowerCase())!
+        }
+
+        // Simpan User ke Database
+        await prisma.user.create({
           data: {
-            title,
-            url,
-            categoryId,
-            isActive: true // Default langsung aktif
+            name,
+            email,
+            password, // Catatan: Idealnya password di-hash (bcrypt/argon2) di sini jika ada utilitasnya
+            roleId,
+            isActive: true,
+            photoProfile: null
           }
         })
         
         successCount++
 
       } catch (err) {
-        console.error(`Gagal import baris: ${row}`, err)
+        console.error(`Gagal import baris: ${email}`, err)
         failCount++
       }
     }
@@ -107,7 +111,7 @@ export default defineEventHandler(async (event) => {
     // 5. Return Response
     return {
       success: true,
-      message: `Import selesai. Berhasil: ${successCount}, Gagal/Dilewati: ${failCount}`,
+      message: `Import selesai. Berhasil: ${successCount}, Gagal/Duplikat: ${failCount}`,
       meta: {
         total: dataRows.length,
         success: successCount,
@@ -116,7 +120,6 @@ export default defineEventHandler(async (event) => {
     }
 
   } catch (error: any) {
-    // Error handling global untuk endpoint ini
     throw createError({
       statusCode: error.statusCode || 500,
       message: error.message || 'Terjadi kesalahan saat memproses file CSV.'

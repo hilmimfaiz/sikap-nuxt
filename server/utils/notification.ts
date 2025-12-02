@@ -2,12 +2,7 @@ import { PrismaClient } from '@prisma/client'
 
 const prisma = new PrismaClient()
 
-export const createNotification = async (
-  userId: number, 
-  title: string, 
-  message: string, 
-  link: string | null = null
-) => {
+export const createNotification = async (userId: number, title: string, message: string, link: string = '#') => {
   try {
     await prisma.notification.create({
       data: {
@@ -15,10 +10,11 @@ export const createNotification = async (
         title,
         message,
         link,
-        isRead: false
+        isRead: false,
+        type: 'info'
       }
     })
   } catch (error) {
-    console.error("Gagal membuat notifikasi:", error)
+    console.error('Gagal membuat notifikasi:', error)
   }
 }

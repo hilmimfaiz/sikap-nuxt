@@ -1,31 +1,36 @@
+import { PrismaClient } from '@prisma/client'
 import { createNotification } from '../../utils/notification'
+import { saveFile } from '../../utils/fileUpload'
 
-// Fungsi saveFile otomatis ter-import dari server/utils/fileUpload.ts
+const prisma = new PrismaClient()
 
 export default defineEventHandler(async (event) => {
   try {
+    // 1. Ambil User dari Cookie (Lebih Aman)
+    const userCookie = getCookie(event, 'user_data')
+    if (!userCookie) throw createError({ statusCode: 401, message: 'Unauthorized' })
+    const currentUser = JSON.parse(userCookie)
+
     const files = await readMultipartFormData(event)
     if (!files) throw createError({ statusCode: 400, message: 'Data tidak valid' })
 
-    // Helper ambil value form
     const getValue = (name: string) => {
       const field = files.find(f => f.name === name)
       return field ? field.data.toString() : null
     }
 
-    const id = getValue('id')
-    const name = getValue('name')
-    const email = getValue('email')
+    // Gunakan ID dari Cookie untuk keamanan, fallback ke form jika perlu (tapi cookie prioritas)
+    const id = currentUser.id 
+    const name = getValue('name') || currentUser.name
+    const email = getValue('email') || currentUser.email
 
-    if (!id) throw createError({ statusCode: 400, message: 'ID User diperlukan' })
-
-    // 1. Siapkan Data Update
+    // 2. Siapkan Data Update
     const updateData: any = {
       name: name,
       email: email
     }
 
-    // 2. Cek File Foto (Jika ada upload baru)
+    // 3. Cek File Foto (Key 'photo' sesuai frontend)
     let isPhotoUpdated = false
     const photoFile = files.find(f => f.name === 'photo' && f.filename)
     
@@ -38,7 +43,7 @@ export default defineEventHandler(async (event) => {
       isPhotoUpdated = true
     }
 
-    // 3. Update Database
+    // 4. Update Database
     const updatedUser = await prisma.user.update({
       where: { id: parseInt(id) },
       data: updateData,
@@ -52,25 +57,23 @@ export default defineEventHandler(async (event) => {
       }
     })
 
-    // 4. KIRIM NOTIFIKASI
-    // Tentukan pesan notifikasi berdasarkan apa yang diubah
+    // 5. Kirim Notifikasi
     let notifTitle = 'Profil Diperbarui'
-    let notifMessage = 'Informasi nama atau email Anda berhasil diperbarui.'
+    let notifMessage = 'Informasi profil Anda berhasil diperbarui.'
 
     if (isPhotoUpdated) {
       notifTitle = 'Foto Profil Baru'
-      notifMessage = 'Foto profil Anda berhasil diubah dan diperbarui.'
+      notifMessage = 'Foto profil Anda berhasil diubah.'
     }
 
-    // Kirim notifikasi ke user yang bersangkutan
     await createNotification(
       updatedUser.id,
       notifTitle,
       notifMessage,
-      '/dashboard/profile' // Link kembali ke profil
+      '/dashboard/profile'
     )
 
-    // [FIX] Flatten object agar struktur sama persis dengan Login
+    // Format response agar sesuai dengan cookie frontend
     const userResponse = {
       id: updatedUser.id,
       name: updatedUser.name,
@@ -86,6 +89,7 @@ export default defineEventHandler(async (event) => {
     }
 
   } catch (error: any) {
+    console.error('Update error:', error)
     if (error.code === 'P2002') {
       throw createError({ statusCode: 400, message: 'Email sudah digunakan user lain' })
     }

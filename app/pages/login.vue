@@ -1,450 +1,249 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 
-// 1. Konfigurasi Halaman
+// Konfigurasi Halaman
 definePageMeta({
   layout: 'default',
   middleware: 'auth'
 })
 
-// 2. Gunakan Global Loading & i18n
 const { startLoading, stopLoading } = useGlobalLoading()
 const { t } = useI18n()
+const router = useRouter()
 
-// 3. State Form & Visibilitas Password
+// Cek jika user sudah login
+const userCookie = useCookie('user_data')
+if (userCookie.value) {
+  navigateTo('/dashboard')
+}
+
+// State Form
 const email = ref('')
 const password = ref('')
 const showPassword = ref(false)
 const errorMessage = ref('')
 const isSubmitting = ref(false)
 
-// 4. Fungsi Login
+// Background Grid (Securely Defined)
+const gridBgImage = `url("data:image/svg+xml,%3Csvg width='60' height='60' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M0 0h60v60H0z' fill='none'/%3E%3Cpath d='M60 0v60H0V0z' stroke='%23000' stroke-width='1' fill='none'/%3E%3C/svg%3E")`
+
+// Fungsi Login
 const handleLogin = async () => {
   isSubmitting.value = true
   startLoading(t('login.loading'))
   errorMessage.value = ''
 
   try {
-    const response = await $fetch('/api/auth/login', {
+    const response: any = await $fetch('/api/auth/login', {
       method: 'POST',
-      body: { 
-        email: email.value, 
-        password: password.value 
-      }
+      body: { email: email.value, password: password.value }
     })
 
     const tokenCookie = useCookie('auth_token', { maxAge: 86400, path: '/' })
-    const userCookie = useCookie('user_data', { maxAge: 86400, path: '/' })
+    const userDataCookie = useCookie('user_data', { maxAge: 86400, path: '/' })
     
-    tokenCookie.value = 'logged-in-' + Date.now()
-    userCookie.value = response.user
+    tokenCookie.value = response.token || ('logged-in-' + Date.now())
+    userDataCookie.value = response.user
 
     await stopLoading()
     isSubmitting.value = false
-
-    window.location.href = '/dashboard'
+    
+    router.push('/dashboard')
 
   } catch (err: any) {
     console.error('Login Error:', err)
     await stopLoading()
     isSubmitting.value = false
-    errorMessage.value = err.data?.statusMessage || t('login.error_default')
+    // Prioritaskan pesan dari server, fallback ke pesan default
+    errorMessage.value = err.data?.message || err.data?.statusMessage || t('login.error_default')
   }
 }
 </script>
 
 <template>
-  <div class="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 via-blue-50 to-cyan-50/50 dark:from-gray-900 dark:via-black dark:to-blue-900/80 transition-all duration-1000 font-sans p-4 relative overflow-hidden">
+  <div class="min-h-screen flex items-center justify-center relative overflow-hidden bg-gradient-to-br from-gray-50 via-blue-50/20 to-cyan-50/10 dark:from-gray-950 dark:via-[#0a1020] dark:to-[#0a1428] px-4 py-12">
     
-    <!-- Animated Background Elements -->
-    <div class="absolute inset-0 -z-10 overflow-hidden">
-      <!-- Light Mode Background -->
-      <div class="absolute -top-40 -right-40 w-96 h-96 bg-gradient-to-br from-blue-200/40 to-cyan-100/30 rounded-full blur-3xl animate-float-slow dark:from-blue-600/20 dark:to-cyan-400/10"></div>
-      <div class="absolute top-1/2 -left-20 w-80 h-80 bg-gradient-to-br from-slate-200/30 to-blue-100/20 rounded-full blur-3xl animate-float-slow delay-1500 dark:from-gray-800/30 dark:to-blue-900/20"></div>
-      <div class="absolute bottom-20 right-1/4 w-60 h-60 bg-gradient-to-br from-cyan-200/25 to-blue-300/20 rounded-full blur-3xl animate-float-slow delay-1000 dark:from-cyan-500/15 dark:to-blue-700/10"></div>
+    <div class="absolute inset-0 -z-10 overflow-hidden pointer-events-none">
+      <div class="absolute top-0 -left-40 w-96 h-96 bg-gradient-to-br from-blue-500/25 to-cyan-400/15 rounded-full blur-3xl animate-float-orb dark:hidden"></div>
+      <div class="absolute bottom-0 -right-40 w-96 h-96 bg-gradient-to-tl from-teal-500/25 to-emerald-400/15 rounded-full blur-3xl animate-float-orb delay-3000 dark:hidden"></div>
       
-      <!-- Dark Mode Additional Elements -->
-      <div class="absolute -bottom-20 -left-20 w-72 h-72 bg-gradient-to-br from-blue-100/20 to-cyan-50/10 rounded-full blur-3xl animate-float-slow delay-500 dark:hidden"></div>
+      <div class="hidden dark:block absolute top-0 -left-40 w-96 h-96 bg-gradient-to-br from-blue-600/20 to-cyan-600/10 rounded-full blur-3xl animate-float-orb"></div>
+      <div class="hidden dark:block absolute bottom-0 -right-40 w-96 h-96 bg-gradient-to-tl from-teal-700/20 to-cyan-700/10 rounded-full blur-3xl animate-float-orb delay-3000"></div>
+      <div class="hidden dark:block absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] bg-gradient-radial from-cyan-600/15 via-transparent to-transparent rounded-full blur-3xl animate-pulse-glow"></div>
       
-      <!-- Animated Grid -->
-      <div class="absolute inset-0 bg-[linear-gradient(rgba(59,130,246,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(59,130,246,0.03)_1px,transparent_1px)] bg-[size:64px_64px] [mask-image:radial-gradient(ellipse_80%_50%_at_50%_50%,black,transparent)] dark:bg-[linear-gradient(rgba(59,130,246,0.05)_1px,transparent_1px),linear-gradient(90deg,rgba(59,130,246,0.05)_1px,transparent_1px)] animate-grid-flow"></div>
-      
-      <!-- Floating Particles -->
-      <div class="absolute top-1/4 left-1/4 w-2 h-2 bg-blue-400/30 rounded-full animate-float-fast dark:bg-cyan-400/40"></div>
-      <div class="absolute top-1/3 right-1/3 w-1 h-1 bg-cyan-300/40 rounded-full animate-float-fast delay-500 dark:bg-blue-400/50"></div>
-      <div class="absolute bottom-1/4 left-1/3 w-1.5 h-1.5 bg-blue-300/25 rounded-full animate-float-fast delay-1000 dark:bg-cyan-300/30"></div>
-      <div class="absolute bottom-1/3 right-1/4 w-1 h-1 bg-cyan-200/30 rounded-full animate-float-fast delay-1500 dark:bg-blue-300/40"></div>
+       <div class="absolute inset-0 opacity-5 dark:opacity-10">
+        <div class="absolute inset-0" :style="{ backgroundImage: gridBgImage }"></div>
+      </div>
     </div>
 
-    <!-- Back Button -->
-    <div class="absolute top-6 left-6 z-10 animate-fade-in-down">
-      <NuxtLink 
-        to="/" 
-        class="flex items-center gap-2 px-4 py-2.5 bg-white/80 backdrop-blur-xl border border-slate-200/50 rounded-2xl shadow-lg hover:shadow-xl transition-all duration-500 text-sm font-medium text-slate-600 hover:text-blue-600 group hover:-translate-y-0.5 hover:border-blue-300/50 dark:bg-gray-900/60 dark:border-gray-700/50 dark:text-gray-300 dark:hover:text-cyan-400 dark:hover:border-cyan-400/30"
-        :title="$t('login.back_home')"
-      >
-        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 transition-transform duration-300 group-hover:-translate-x-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+    <div class="absolute top-6 left-6 z-30">
+      <NuxtLink to="/" class="group flex items-center gap-2 px-4 py-2.5 bg-white/80 dark:bg-gray-900/90 backdrop-blur-xl border border-gray-200/50 dark:border-gray-800/60 rounded-full shadow-lg hover:shadow-xl transition-all duration-300 text-sm font-medium text-gray-700 dark:text-gray-300 hover:text-blue-500 dark:hover:text-cyan-400">
+        <svg class="w-4 h-4 transition-transform group-hover:-translate-x-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
         </svg>
-        <span class="hidden sm:inline">{{ $t('login.back_home') }}</span>
+        <span>{{ $t('login.back_home') }}</span>
       </NuxtLink>
     </div>
-
-    <!-- Language & Theme Toggle -->
-    <div class="absolute top-6 right-6 z-10 animate-fade-in-down flex items-center gap-3">
+    <div class="absolute top-6 right-6 z-30 flex items-center gap-3">
       <LanguageSwitcher />
       <ThemeToggle />
     </div>
 
-    <!-- Main Login Card -->
-    <div class="bg-white/80 backdrop-blur-xl p-8 rounded-3xl shadow-2xl border border-slate-200/50 w-full max-w-md relative z-10 animate-fade-in-up transition-all duration-700 hover:shadow-3xl group overflow-hidden dark:bg-gradient-to-br dark:from-gray-800/80 dark:via-gray-900/90 dark:to-blue-900/60 dark:backdrop-blur-2xl dark:border-gray-700/30">
-      
-      <!-- Animated Border Glow -->
-      <div class="absolute inset-0 rounded-3xl bg-gradient-to-r from-blue-500/5 via-cyan-500/5 to-indigo-500/5 opacity-0 group-hover:opacity-100 transition-opacity duration-1000 dark:from-cyan-500/10 dark:via-blue-600/10 dark:to-indigo-500/10"></div>
-      
-      <!-- Inner Shine Effect -->
-      <div class="absolute inset-0 bg-gradient-to-br from-white/20 via-transparent to-slate-100/10 rounded-3xl dark:from-white/5 dark:via-transparent dark:to-black/10"></div>
-      
-      <!-- Animated Background Pattern -->
-      <div class="absolute inset-0 opacity-10">
-        <div class="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,rgba(59,130,246,0.1),transparent_50%)] animate-pulse-slow dark:bg-[radial-gradient(circle_at_50%_50%,rgba(59,130,246,0.15),transparent_50%)]"></div>
-      </div>
+    <div class="w-full max-w-4xl mx-auto animate-slide-up">
+      <div class="grid lg:grid-cols-2 gap-0 rounded-3xl overflow-hidden shadow-2xl bg-white/70 dark:bg-gray-900/80 backdrop-blur-2xl border border-white/30 dark:border-gray-800/60">
 
-      <!-- Logo & Header -->
-      <div class="text-center mb-8 relative z-10">
-        <div class="relative inline-block">
-          <div class="absolute -inset-4 bg-gradient-to-r from-blue-400 to-cyan-400 rounded-full blur-lg opacity-20 group-hover:opacity-30 transition-opacity duration-500 dark:from-cyan-500 dark:to-blue-600"></div>
-          <img 
-            src="/logo.png" 
-            alt="Logo SIKAP" 
-            class="h-20 w-auto mx-auto mb-4 drop-shadow-xl transition-all duration-500 group-hover:scale-110 group-hover:rotate-3 relative z-10"
-          />
-        </div>
-        
-        <h1 class="text-3xl font-bold bg-gradient-to-r from-slate-800 via-blue-700 to-cyan-600 bg-clip-text text-transparent tracking-tight mb-2 animate-gradient-flow dark:from-cyan-400 dark:via-blue-400 dark:to-indigo-400">
-          {{ $t('login.title') }}
-        </h1>
-        <p class="text-sm text-slate-500 transition-colors dark:text-gray-400">
-          {{ $t('login.subtitle') }}
-        </p>
-      </div>
+        <div class="hidden lg:flex flex-col justify-center p-10 relative overflow-hidden bg-gradient-to-br from-blue-700 via-teal-700 to-cyan-800 dark:from-blue-800 dark:via-[#0f4c5c] dark:to-[#0f6b7a]">
+          
+          <div class="absolute inset-0 opacity-30">
+            <div class="absolute inset-0 bg-gradient-to-tr from-cyan-500/30 via-transparent to-blue-700/30"></div>
+          </div>
+          <div class="absolute top-8 right-8 w-72 h-72 bg-cyan-500/15 rounded-full blur-3xl animate-float-orb"></div>
 
-      <!-- Error Message -->
-      <div 
-        v-if="errorMessage" 
-        class="mb-6 bg-gradient-to-r from-red-50 to-orange-50 backdrop-blur-sm border border-red-200/50 text-red-600 px-4 py-3 rounded-xl text-sm flex items-start animate-shake dark:bg-gradient-to-r dark:from-red-900/40 dark:to-orange-900/30 dark:border-red-700/50 dark:text-red-300"
-      >
-        <span class="mr-3 text-lg">⚠️</span>
-        <span class="flex-1">{{ errorMessage }}</span>
-      </div>
-
-      <!-- Login Form -->
-      <form @submit.prevent="handleLogin" class="space-y-6 relative z-10">
-        
-        <!-- Email Input -->
-        <div class="group">
-          <label class="block text-sm font-semibold text-slate-700 mb-2 transition-colors dark:text-gray-300">
-            {{ $t('login.email') }}
-          </label>
-          <div class="relative">
-            <div class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 transition-colors duration-300 group-focus-within:text-blue-500 dark:text-gray-500 dark:group-focus-within:text-cyan-400">
-              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
-              </svg>
+          <div class="relative z-10 max-w-sm mx-auto text-center">
+            <div class="mb-8 animate-slide-up delay-200">
+              <img src="/logo.png" alt="SIKAP" class="h-20 mx-auto drop-shadow-2xl filter brightness-110" />
             </div>
-            <input 
-              v-model="email" 
-              type="email" 
-              required
-              class="w-full pl-11 pr-4 py-3.5 bg-slate-50/80 backdrop-blur-sm border border-slate-300/50 text-slate-900 rounded-xl focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 outline-none transition-all duration-500 placeholder-slate-400 focus:shadow-lg focus:scale-[1.02] group-hover:border-slate-400 focus:bg-white/90 dark:bg-black/40 dark:border-gray-700/50 dark:text-white dark:placeholder-gray-500 dark:focus:ring-cyan-500/50 dark:focus:border-cyan-500 dark:group-hover:border-gray-500 dark:focus:bg-black/60"
-              placeholder="admin@sikap.com"
-            />
-            <div class="absolute inset-0 rounded-xl bg-gradient-to-r from-blue-500/5 to-cyan-500/5 opacity-0 group-focus-within:opacity-100 transition-opacity duration-300 pointer-events-none dark:from-cyan-500/5 dark:to-blue-500/5"></div>
-          </div>
-        </div>
 
-        <!-- Password Input -->
-        <div class="group">
-          <label class="block text-sm font-semibold text-slate-700 mb-2 transition-colors dark:text-gray-300">
-            {{ $t('login.password') }}
-          </label>
-          <div class="relative">
-            <div class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 transition-colors duration-300 group-focus-within:text-blue-500 dark:text-gray-500 dark:group-focus-within:text-cyan-400">
-              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
-              </svg>
+            <h1 class="text-4xl font-black mb-3 leading-tight text-white animate-slide-up delay-300">
+              {{ $t('login.title') }}
+            </h1>
+            <p class="text-lg text-cyan-100 mb-10 animate-slide-up delay-400">
+              {{ $t('login.subtitle') }}
+            </p>
+
+            <div class="space-y-5 text-left animate-slide-up delay-500">
+              <div class="flex items-center gap-4 text-white/95">
+                <div class="w-10 h-10 rounded-xl bg-white/15 backdrop-blur-sm flex items-center justify-center border border-white/20">
+                  <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                </div>
+                <span class="font-medium text-base">{{ $t('login.features.realtime') }}</span>
+              </div>
+              <div class="flex items-center gap-4 text-white/95">
+                <div class="w-10 h-10 rounded-xl bg-white/15 backdrop-blur-sm flex items-center justify-center border border-white/20">
+                  <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+                </div>
+                <span class="font-medium text-base">{{ $t('login.features.performance') }}</span>
+              </div>
+              <div class="flex items-center gap-4 text-white/95">
+                <div class="w-10 h-10 rounded-xl bg-white/15 backdrop-blur-sm flex items-center justify-center border border-white/20">
+                  <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+                </div>
+                <span class="font-medium text-base">{{ $t('login.features.security') }}</span>
+              </div>
             </div>
-            <input 
-              v-model="password" 
-              :type="showPassword ? 'text' : 'password'" 
-              required
-              class="w-full pl-11 pr-11 py-3.5 bg-slate-50/80 backdrop-blur-sm border border-slate-300/50 text-slate-900 rounded-xl focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 outline-none transition-all duration-500 placeholder-slate-400 focus:shadow-lg focus:scale-[1.02] group-hover:border-slate-400 focus:bg-white/90 dark:bg-black/40 dark:border-gray-700/50 dark:text-white dark:placeholder-gray-500 dark:focus:ring-cyan-500/50 dark:focus:border-cyan-500 dark:group-hover:border-gray-500 dark:focus:bg-black/60"
-              placeholder="••••••••"
-            />
-            
-            <!-- Password Toggle Button -->
-            <button 
-              type="button"
-              @click="showPassword = !showPassword"
-              class="absolute right-3 top-1/2 -translate-y-1/2 p-1.5 text-slate-400 hover:text-blue-500 focus:outline-none transition-all duration-300 rounded-lg hover:bg-slate-200/50 backdrop-blur-sm dark:text-gray-500 dark:hover:text-cyan-400 dark:hover:bg-gray-700/50"
-              tabindex="-1"
-            >
-              <svg v-if="showPassword" xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-              </svg>
-              <svg v-else xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.542-7a10.05 10.05 0 011.574-2.59M6 6l12 12" />
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.94 17.94A10.07 10.07 0 0112 19c-4.478 0-8.268-2.943-9.542-7a10.05 10.05 0 012.433-3.633M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-              </svg>
-            </button>
-            
-            <div class="absolute inset-0 rounded-xl bg-gradient-to-r from-blue-500/5 to-cyan-500/5 opacity-0 group-focus-within:opacity-100 transition-opacity duration-300 pointer-events-none dark:from-cyan-500/5 dark:to-blue-500/5"></div>
-          </div>
 
-          <!-- Forgot Password Link -->
-          <div class="flex justify-end mt-3">
-            <NuxtLink to="/forgot-password" class="text-xs font-semibold text-blue-600 hover:text-blue-700 transition-all duration-300 hover:underline flex items-center gap-1 group/link dark:text-cyan-400 dark:hover:text-cyan-300">
-              {{ $t('login.forgot_pass') }}
-              <svg class="w-3 h-3 transition-transform duration-300 group-hover/link:translate-x-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
-              </svg>
-            </NuxtLink>
+            <p class="mt-12 text-sm text-cyan-200/70">BPS Tanjung Pinang | {{ $t('login.footer') }}</p>
           </div>
         </div>
 
-        <!-- Submit Button -->
-        <button 
-          type="submit" 
-          :disabled="isSubmitting"
-          class="w-full bg-gradient-to-r from-blue-600 via-cyan-600 to-indigo-600 hover:from-blue-500 hover:via-cyan-500 hover:to-indigo-500 text-white font-bold py-4 rounded-xl shadow-xl shadow-blue-500/30 hover:shadow-2xl hover:shadow-blue-500/40 transition-all duration-500 transform hover:-translate-y-0.5 active:scale-95 flex justify-center items-center gap-2 group/btn relative overflow-hidden disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none dark:from-cyan-600 dark:via-blue-600 dark:to-indigo-600 dark:hover:from-cyan-500 dark:hover:via-blue-500 dark:hover:to-indigo-500 dark:shadow-blue-500/30 dark:hover:shadow-blue-500/40"
-          :class="isSubmitting ? 'cursor-wait' : ''"
-        >
-          <!-- Animated Background -->
-          <div class="absolute inset-0 bg-gradient-to-r from-blue-500 via-cyan-500 to-indigo-500 opacity-0 group-hover/btn:opacity-100 transition-opacity duration-300 dark:from-cyan-500 dark:via-blue-500 dark:to-indigo-500"></div>
-          
-          <!-- Shine Effect -->
-          <div class="absolute inset-0 bg-white/30 transform -skew-x-12 -translate-x-full group-hover/btn:translate-x-full transition-transform duration-1000"></div>
-          
-          <!-- Pulse Ring -->
-          <div class="absolute inset-0 rounded-xl border-2 border-blue-400/30 animate-pulse-ring opacity-0 group-hover/btn:opacity-100 dark:border-cyan-400/30"></div>
-          
-          <!-- Button Content -->
-          <span class="relative z-10 flex items-center text-sm tracking-wide">
-            <span v-if="!isSubmitting">{{ $t('login.btn_submit') }}</span>
-            <span v-else>{{ $t('login.loading') }}</span>
-            <svg v-if="!isSubmitting" xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 ml-2 transition-transform duration-300 group-hover/btn:translate-x-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3" />
-            </svg>
-            <svg v-else class="animate-spin h-4 w-4 ml-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-            </svg>
-          </span>
-        </button>
-      </form>
+        <div class="flex flex-col justify-center p-8 lg:p-10 bg-white/80 dark:bg-gray-900/90 backdrop-blur-xl">
+          <div class="max-w-xs mx-auto w-full">
+            <div class="flex justify-center mb-8 lg:hidden animate-slide-down">
+              <img src="/logo.png" alt="SIKAP" class="h-16 drop-shadow-xl" />
+            </div>
 
-      <!-- Footer -->
-      <p class="mt-8 text-center text-xs text-slate-400 transition-colors relative z-10 dark:text-gray-500">
-        &copy; 2025 SIKAP App. {{ $t('login.footer') }}
-      </p>
+            <h2 class="text-2xl font-bold text-center bg-gradient-to-r from-blue-600 to-cyan-600 dark:from-cyan-400 dark:to-blue-500 bg-clip-text text-transparent mb-2 animate-slide-down delay-100">
+              {{ $t('login.form_title') }}
+            </h2>
+            <p class="text-center text-sm text-gray-600 dark:text-gray-400 mb-7 animate-slide-down delay-200">
+              {{ $t('login.form_subtitle') }}
+            </p>
 
+            <Transition name="fade">
+              <div v-if="errorMessage" class="mb-5 p-4 bg-red-500/10 dark:bg-red-900/30 border border-red-500/30 dark:border-red-800/50 rounded-xl text-red-600 dark:text-red-300 text-sm flex items-center gap-3 backdrop-blur-sm animate-shake">
+                <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+                <span>{{ errorMessage }}</span>
+              </div>
+            </Transition>
+
+            <form @submit.prevent="handleLogin" class="space-y-5">
+              <div class="animate-slide-up delay-300">
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('login.email') }}</label>
+                <div class="relative">
+                  <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-gray-500 dark:text-gray-400">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+                  </div>
+                  <input v-model="email" type="email" required :placeholder="$t('login.email_placeholder')"
+                    class="w-full pl-12 pr-4 py-3.5 bg-gray-50/60 dark:bg-gray-800/70 border border-gray-300/50 dark:border-gray-700/70 rounded-xl focus:ring-4 focus:ring-cyan-500/40 focus:border-cyan-500 dark:focus:border-cyan-600 outline-none transition-all duration-300 backdrop-blur-sm text-gray-900 dark:text-white placeholder-gray-500"/>
+                </div>
+              </div>
+
+              <div class="animate-slide-up delay-400">
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{{ $t('login.password') }}</label>
+                <div class="relative">
+                  <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-gray-500 dark:text-gray-400">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+                  </div>
+                  <input v-model="password" :type="showPassword ? 'text' : 'password'" required placeholder="••••••••"
+                    class="w-full pl-12 pr-12 py-3.5 bg-gray-50/60 dark:bg-gray-800/70 border border-gray-300/50 dark:border-gray-700/70 rounded-xl focus:ring-4 focus:ring-cyan-500/40 focus:border-cyan-500 dark:focus:border-cyan-600 outline-none transition-all duration-300 backdrop-blur-sm text-gray-900 dark:text-white"/>
+                  <button type="button" @click="showPassword = !showPassword" class="absolute inset-y-0 right-0 pr-4 flex items-center text-gray-500 dark:text-gray-400 hover:text-cyan-500 transition">
+                    <svg v-if="showPassword" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+                    <svg v-else class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.542-7a10.05 10.05 0 011.574-2.59M6 6l12 12 M17.94 17.94A10.07 10.07 0 0112 19c-4.478 0-8.268-2.943-9.542-7a10.05 10.05 0 012.433-3.633"/></svg>
+                  </button>
+                </div>
+                <div class="mt-2 text-right">
+                  <NuxtLink to="/forgot-password" class="text-xs font-medium text-cyan-600 hover:text-cyan-700 dark:text-cyan-400 dark:hover:text-cyan-300">
+                    {{ $t('login.forgot_pass') }}
+                  </NuxtLink>
+                </div>
+              </div>
+
+              <button type="submit" :disabled="isSubmitting"
+                class="relative w-full mt-7 overflow-hidden bg-gradient-to-r from-blue-600 via-cyan-600 to-teal-600 hover:from-blue-700 hover:via-cyan-700 hover:to-teal-700 text-white font-bold py-4 rounded-xl shadow-xl shadow-cyan-500/40 dark:shadow-cyan-600/50 hover:shadow-2xl transform hover:-translate-y-1 transition-all duration-500 disabled:opacity-70 group animate-slide-up delay-500">
+                <span class="relative z-10 flex items-center justify-center gap-3">
+                  <span v-if="!isSubmitting">{{ $t('login.btn_submit') }}</span>
+                  <span v-else>{{ $t('login.loading') }}</span>
+                  <svg v-if="!isSubmitting" class="w-5 h-5 transition-transform group-hover:translate-x-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
+                  <svg v-else class="animate-spin w-5 h-5" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                </span>
+                <div class="absolute inset-0 bg-white/25 -translate-x-full group-hover:translate-x-full transition-transform duration-1000 skew-x-12"></div>
+              </button>
+            </form>
+
+            <div class="mt-10 text-center animate-fade-in delay-500">
+               <p class="text-xs text-gray-500 dark:text-gray-400">© 2025 SIKAP App. {{ $t('login.rights_reserved') }}</p>
+            </div>
+
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </template>
 
 <style scoped>
-@keyframes fadeInUp {
-  from { 
-    opacity: 0; 
-    transform: translateY(40px) scale(0.95); 
-  }
-  to { 
-    opacity: 1; 
-    transform: translateY(0) scale(1); 
-  }
+@keyframes float-orb {
+  0%, 100% { transform: translateY(0) translateX(0) rotate(0deg); }
+  50% { transform: translateY(-40px) translateX(20px) rotate(5deg); }
 }
+@keyframes pulse-glow {
+  0%, 100% { opacity: 0.2; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(1.05); }
+}
+@keyframes slide-up { from { opacity: 0; transform: translateY(30px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes slide-down { from { opacity: 0; transform: translateY(-30px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes shake { 0%,100%{transform:translateX(0)} 10%,30%,50%,70%,90%{transform:translateX(-8px)} 20%,40%,60%,80%{transform:translateX(8px)} }
 
-@keyframes fadeInDown {
-  from { 
-    opacity: 0; 
-    transform: translateY(-40px); 
-  }
-  to { 
-    opacity: 1; 
-    transform: translateY(0); 
-  }
-}
+.animate-float-orb { animation: float-orb 28s ease-in-out infinite; }
+.animate-pulse-glow { animation: pulse-glow 12s ease-in-out infinite; }
+.animate-slide-up { animation: slide-up 0.9s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+.animate-slide-down { animation: slide-down 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+.animate-shake { animation: shake 0.6s ease-out; }
 
-@keyframes shake {
-  0%, 100% { transform: translateX(0); }
-  10%, 30%, 50%, 70%, 90% { transform: translateX(-8px); }
-  20%, 40%, 60%, 80% { transform: translateX(8px); }
-}
+.delay-100 { animation-delay: 0.1s; }
+.delay-200 { animation-delay: 0.2s; }
+.delay-300 { animation-delay: 0.3s; }
+.delay-400 { animation-delay: 0.4s; }
+.delay-500 { animation-delay: 0.5s; }
+.delay-3000 { animation-delay: 3s; }
 
-@keyframes float-slow {
-  0%, 100% { 
-    transform: translateY(0px) rotate(0deg) scale(1); 
-  }
-  33% { 
-    transform: translateY(-30px) rotate(3deg) scale(1.05); 
-  }
-  66% { 
-    transform: translateY(15px) rotate(-2deg) scale(0.95); 
-  }
-}
+.fade-enter-active, .fade-leave-active { transition: all 0.4s ease; }
+.fade-enter-from, .fade-leave-to { opacity: 0; transform: translateY(-12px); }
 
-@keyframes float-fast {
-  0%, 100% { 
-    transform: translateY(0px) translateX(0px); 
-  }
-  25% { 
-    transform: translateY(-20px) translateX(10px); 
-  }
-  50% { 
-    transform: translateY(-10px) translateX(-10px); 
-  }
-  75% { 
-    transform: translateY(10px) translateX(5px); 
-  }
-}
-
-@keyframes gradient-flow {
-  0%, 100% { 
-    background-position: 0% 50%; 
-  }
-  50% { 
-    background-position: 100% 50%; 
-  }
-}
-
-@keyframes grid-flow {
-  0% { 
-    transform: translateY(0px); 
-  }
-  100% { 
-    transform: translateY(64px); 
-  }
-}
-
-@keyframes pulse-ring {
-  0% { 
-    box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.4); 
-  }
-  70% { 
-    box-shadow: 0 0 0 10px rgba(59, 130, 246, 0); 
-  }
-  100% { 
-    box-shadow: 0 0 0 0 rgba(59, 130, 246, 0); 
-  }
-}
-
-@keyframes pulse-slow {
-  0%, 100% { 
-    opacity: 0.1; 
-  }
-  50% { 
-    opacity: 0.2; 
-  }
-}
-
-.animate-fade-in-up {
-  animation: fadeInUp 1s cubic-bezier(0.22, 0.61, 0.36, 1) forwards;
-}
-
-.animate-fade-in-down {
-  animation: fadeInDown 1s cubic-bezier(0.22, 0.61, 0.36, 1) forwards;
-}
-
-.animate-shake {
-  animation: shake 0.6s cubic-bezier(.36,.07,.19,.97) both;
-}
-
-.animate-float-slow {
-  animation: float-slow 12s ease-in-out infinite;
-}
-
-.animate-float-fast {
-  animation: float-fast 8s ease-in-out infinite;
-}
-
-.animate-gradient-flow {
-  background-size: 200% 200%;
-  animation: gradient-flow 3s ease infinite;
-}
-
-.animate-grid-flow {
-  animation: grid-flow 20s linear infinite;
-}
-
-.animate-pulse-ring {
-  animation: pulse-ring 2s infinite;
-}
-
-.animate-pulse-slow {
-  animation: pulse-slow 4s ease-in-out infinite;
-}
-
-/* Custom shadows */
-.shadow-3xl {
-  box-shadow: 
-    0 25px 50px -12px rgba(0, 0, 0, 0.15),
-    0 0 0 1px rgba(59, 130, 246, 0.1);
-}
-
-/* Enhanced focus styles */
-input:focus {
-  box-shadow: 
-    0 0 0 3px rgba(59, 130, 246, 0.1),
-    0 8px 40px rgba(0, 0, 0, 0.1),
-    inset 0 1px 0 rgba(255, 255, 255, 0.1);
-}
-
-/* Dark mode focus styles */
-@media (prefers-color-scheme: dark) {
-  input:focus {
-    box-shadow: 
-      0 0 0 3px rgba(34, 211, 238, 0.1),
-      0 8px 40px rgba(0, 0, 0, 0.3),
-      inset 0 1px 0 rgba(255, 255, 255, 0.05);
-  }
-}
-
-/* Custom scrollbar */
-::-webkit-scrollbar {
-  width: 6px;
-}
-
-::-webkit-scrollbar-track {
-  background: rgba(75, 85, 99, 0.1);
-}
-
-::-webkit-scrollbar-thumb {
-  background: linear-gradient(to bottom, #3b82f6, #06b6d4);
-  border-radius: 3px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: linear-gradient(to bottom, #2563eb, #0891b2);
-}
-
-/* Selection styles */
-::selection {
-  background: rgba(59, 130, 246, 0.3);
-  color: white;
-}
-
-/* Dark mode selection */
-@media (prefers-color-scheme: dark) {
-  ::selection {
-    background: rgba(34, 211, 238, 0.3);
-  }
-}
-
-/* Smooth transitions */
-* {
-  transition-property: color, background-color, border-color, transform, box-shadow, opacity;
-  transition-duration: 400ms;
-  transition-timing-function: cubic-bezier(0.25, 0.46, 0.45, 0.94);
-}
+* { transition: all 0.35s cubic-bezier(0.4, 0, 0.2, 1); }
 </style>
