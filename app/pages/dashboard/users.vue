@@ -458,7 +458,7 @@ const getStatusBadgeClass = (isActive: boolean) => {
                 </td>
                 <td class="px-6 py-4 hidden sm:table-cell">
                   <span :class="getRoleBadgeClass(user.role?.name)" class="px-2.5 py-1 rounded-lg text-[10px] font-semibold capitalize tracking-wide shadow-sm">
-                    {{ user.role?.name === 'admin' ? $t('roles.super_admin') : user.role?.name }}
+                    {{ user.role?.name === 'admin' ? $t('roles.Admin') : user.role?.name }}
                   </span>
                 </td>
                 <td class="px-6 py-4">
