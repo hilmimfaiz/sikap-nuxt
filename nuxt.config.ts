@@ -1,3 +1,4 @@
+// https://nuxt.com/docs/api/configuration/nuxt-config
 export default defineNuxtConfig({
   // 1. Mode Kompatibilitas Nuxt 4
   future: {
@@ -7,7 +8,7 @@ export default defineNuxtConfig({
   compatibilityDate: '2024-11-01',
   devtools: { enabled: true },
 
-  // Optimasi Memori: Matikan sourcemap di server & client
+  // Optimasi Memori: Matikan sourcemap di server & client (Bagus untuk Production)
   sourcemap: {
     server: false,
     client: false
@@ -61,7 +62,28 @@ export default defineNuxtConfig({
     typeCheck: false
   },
 
-  // 7. Konfigurasi Vite & Optimasi Build
+  // --- [TAMBAHAN KHUSUS DEPLOY] ---
+  
+  // 7. Konfigurasi Nitro untuk Vercel
+  nitro: {
+    preset: 'vercel', // Memberitahu Nuxt untuk mengoptimalkan output khusus Vercel
+  },
+
+  // 8. Runtime Config (Agar Environment Variables terbaca di Server Vercel)
+  runtimeConfig: {
+    // Variable Private (Hanya tersedia di sisi Server/API)
+    // Pastikan nama variabel ini ada di Settings > Environment Variables di Vercel
+    cloudinaryCloudName: process.env.CLOUDINARY_CLOUD_NAME,
+    cloudinaryApiKey: process.env.CLOUDINARY_API_KEY,
+    cloudinaryApiSecret: process.env.CLOUDINARY_API_SECRET,
+    
+    // Variable Public (Tersedia di Client & Server)
+    public: {
+      apiBase: process.env.NUXT_PUBLIC_BASE_URL || ''
+    }
+  },
+
+  // 9. Konfigurasi Vite & Optimasi Build
   vite: {
     build: {
       chunkSizeWarningLimit: 1000, // Naikkan limit warning chunk size
@@ -76,11 +98,13 @@ export default defineNuxtConfig({
         }
       }
     },
+    
     server: {
       allowedHosts: [
         'adf2c3843988.ngrok-free.app',
         'localhost',
-        '127.0.0.1'
+        '127.0.0.1',
+        '.vercel.app' // Izinkan domain Vercel
       ]
     }
   }
