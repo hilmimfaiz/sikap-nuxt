@@ -7,6 +7,17 @@ export default defineNuxtConfig({
   compatibilityDate: '2024-11-01',
   devtools: { enabled: true },
 
+  // Optimasi Memori: Matikan sourcemap di server & client
+  sourcemap: {
+    server: false,
+    client: false
+  },
+
+  // Optimasi Memori: Fitur eksperimental
+  experimental: {
+    payloadExtraction: false
+  },
+
   // 2. Modul
   modules: [
     '@nuxtjs/tailwindcss',
@@ -15,27 +26,21 @@ export default defineNuxtConfig({
     '@nuxtjs/i18n'
   ],
 
-  // 3. Konfigurasi i18n (FIXED)
+  // 3. Konfigurasi i18n
   i18n: {
-    // Menggunakan strategi 'no_prefix' agar URL tetap bersih 
-    // dan bahasa bergantung sepenuhnya pada cookie/state.
-    // Jika Anda ingin URL seperti /en/login, ubah kembali ke 'prefix_except_default'
     strategy: 'no_prefix', 
-    
     defaultLocale: 'id',
-    lazy: false, // Load semua locale di awal agar transisi instan
+    lazy: false,
     langDir: 'locales',
     locales: [
       { code: 'id', name: 'Indonesia', file: 'id.json', iso: 'id-ID' },
       { code: 'en', name: 'English', file: 'en.json', iso: 'en-US' }
     ],
-    
-    // Konfigurasi deteksi bahasa yang lebih persisten
     detectBrowserLanguage: {
-      useCookie: true,            // Wajib true agar pilihan user tersimpan
-      cookieKey: 'i18n_redirected', // Nama cookie
-      redirectOn: 'root',         // Hanya redirect di root jika belum ada cookie
-      alwaysRedirect: false,      // PENTING: Set false agar tidak memaksa redirect setiap navigasi
+      useCookie: true,
+      cookieKey: 'i18n_redirected',
+      redirectOn: 'root',
+      alwaysRedirect: false,
       fallbackLocale: 'id'
     }
   },
@@ -50,13 +55,27 @@ export default defineNuxtConfig({
     transpile: ['chart.js']
   },
   
-  // 6. TypeScript
+  // 6. TypeScript: Matikan type checking saat runtime untuk hemat memori
   typescript: {
-    shim: false
+    shim: false,
+    typeCheck: false
   },
 
-  // 7. Konfigurasi Vite
+  // 7. Konfigurasi Vite & Optimasi Build
   vite: {
+    build: {
+      chunkSizeWarningLimit: 1000, // Naikkan limit warning chunk size
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            // Pisahkan node_modules besar ke chunk terpisah
+            if (id.includes('node_modules')) {
+              return 'vendor';
+            }
+          }
+        }
+      }
+    },
     server: {
       allowedHosts: [
         'adf2c3843988.ngrok-free.app',

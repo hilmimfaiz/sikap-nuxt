@@ -35,7 +35,6 @@ model User {
 
   categoriesInCharge Category[] @relation("CategoryInCharge") 
 
-  // --- Relasi ke Fitur Lain ---
   notifications    Notification[]
   sentMessages     Message[]      @relation("SentMessages")
   receivedMessages Message[]      @relation("ReceivedMessages")
@@ -48,7 +47,7 @@ model Category {
   name       String
   links      Link[]
   inChargeId Int?
-  // FIX: Gunakan SetNull agar jika User dihapus, kategori tetap ada tapi tanpa PIC
+
   inCharge   User?     @relation("CategoryInCharge", fields: [inChargeId], references: [id], onDelete: SetNull)
 }
 
@@ -56,8 +55,14 @@ model Folder {
   id        Int       @id @default(autoincrement())
   name      String
   userId    Int
-  // FIX: Gunakan Cascade agar folder ikut terhapus jika User pemilik dihapus
+
   user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  parentId  Int?
+  parent    Folder?   @relation("FolderHierarchy", fields: [parentId], references: [id], onDelete: Cascade) // Jika parent dihapus, anak ikut terhapus
+  children  Folder[]  @relation("FolderHierarchy")
+
+
   archives  Archive[]
   shares    FolderShare[]
   createdAt DateTime  @default(now())
@@ -67,7 +72,7 @@ model FolderShare {
   id        Int      @id @default(autoincrement())
   folderId  Int
   userId    Int
-  // FIX: Cascade delete untuk share folder
+
   folder    Folder   @relation(fields: [folderId], references: [id], onDelete: Cascade)
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   createdAt DateTime @default(now())
@@ -82,10 +87,10 @@ model Archive {
   fileSize   Int
   fileType   String
   folderId   Int
-  // FIX: Jika folder induk dihapus, arsip di dalamnya ikut terhapus
+
   folder     Folder   @relation(fields: [folderId], references: [id], onDelete: Cascade)
   uploaderId Int
-  // FIX: Jika user pengupload dihapus, arsip ikut terhapus (Opsional: bisa juga SetNull jika ingin file tetap ada)
+
   uploader   User     @relation(fields: [uploaderId], references: [id], onDelete: Cascade)
   fileShares ArchiveShare[]
   createdAt  DateTime @default(now())
@@ -95,7 +100,7 @@ model ArchiveShare {
   id        Int      @id @default(autoincrement())
   archiveId Int
   userId    Int
-  // FIX: Cascade delete untuk share file
+
   archive   Archive  @relation(fields: [archiveId], references: [id], onDelete: Cascade)
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   createdAt DateTime @default(now())
@@ -108,7 +113,7 @@ model Link {
   title      String
   url        String
   categoryId Int
-  // FIX: Jika kategori dihapus, link di dalamnya ikut terhapus
+
   category   Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
   isActive   Boolean  @default(true)
 }
@@ -116,13 +121,13 @@ model Link {
 model Notification {
   id        Int      @id @default(autoincrement())
   userId    Int
-  // FIX: Notifikasi user ikut terhapus jika user dihapus
+
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   title     String
   message   String
   isRead    Boolean  @default(false)
   type      String   @default("info") 
-  link      String?  
+  link      String?
   createdAt DateTime @default(now())
 }
 
@@ -137,8 +142,7 @@ model Message {
   sender     User     @relation("SentMessages", fields: [senderId], references: [id], onDelete: Cascade)
   receiver   User     @relation("ReceivedMessages", fields: [receiverId], references: [id], onDelete: Cascade)
 
-  replyToId  Int?     
-  
+  replyToId  Int?
   replyTo    Message?  @relation("ReplyRelation", fields: [replyToId], references: [id], onDelete: SetNull, onUpdate: Cascade)
   replies    Message[] @relation("ReplyRelation")
 }

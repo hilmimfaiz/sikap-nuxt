@@ -24,17 +24,24 @@ const limit = ref(10)
 const allUsers = ref<any[]>([]) 
 
 // Modal States
+const showAddDropdown = ref(false)
+const showCreateFolderModal = ref(false)
 const showUploadModal = ref(false)
-const showRenameModal = ref(false)
+const showRenameModal = ref(false) // Rename Folder Utama
+const showRenameSubFolderModal = ref(false) // Rename Sub-folder
 const showDeleteFolderConfirm = ref(false)
+const showDeleteSubFolderConfirm = ref(false)
 const showDeleteFileConfirm = ref(false)
 const showShareFileModal = ref(false)
 const showShareFolderModal = ref(false)
 const showBulkDeleteConfirm = ref(false)
 
 // Forms & Data Holders
+const createFolderName = ref('')
 const newFolderName = ref('')
+const newSubFolderName = ref('')
 const selectedFile = ref<any>(null)
+const selectedSubFolder = ref<any>(null)
 const shareFileUserIds = ref<number[]>([]) 
 const shareFolderUserIds = ref<number[]>([])
 const selectedFileIds = ref<number[]>([]) 
@@ -47,9 +54,13 @@ const uploadForm = ref({
 // Animation Trigger
 const isVisible = ref(false)
 onMounted(() => {
-  setTimeout(() => {
-    isVisible.value = true
-  }, 100)
+  setTimeout(() => { isVisible.value = true }, 100)
+  document.addEventListener('click', (e) => {
+    const target = e.target as HTMLElement
+    if (!target.closest('.add-dropdown-container')) {
+      showAddDropdown.value = false
+    }
+  })
 })
 
 // --- DATA FETCHING ---
@@ -63,37 +74,26 @@ if (error.value) {
   router.push('/dashboard/archives')
 }
 
+// Computed Data
 const folder = computed(() => response.value?.folder || null)
 const archives = computed(() => folder.value?.archives || [])
+const childrenFolders = computed(() => folder.value?.children || [])
 const meta = computed(() => response.value?.meta || { total: 0, page: 1, limit: 10, totalPages: 1 })
 
-watch(search, () => {
-  page.value = 1
-  selectedFileIds.value = []
-})
-
-watch(page, () => {
-  selectedFileIds.value = []
-})
+watch(search, () => { page.value = 1; selectedFileIds.value = [] })
+watch(page, () => { selectedFileIds.value = [] })
 
 const changePage = (newPage: number) => {
-  if (newPage >= 1 && newPage <= meta.value.totalPages) {
-    page.value = newPage
-  }
+  if (newPage >= 1 && newPage <= meta.value.totalPages) page.value = newPage
 }
 
 // --- FETCH USERS ---
 const fetchAllUsers = async () => {
   if (allUsers.value.length > 0) return 
-
   try {
     const res: any = await $fetch('/api/users', { query: { limit: 1000 } })
-    const rawUsers = res.data || []
-    allUsers.value = rawUsers.filter((u: any) => u.id !== userCookie.value.id)
-  } catch (e) {
-    console.error(e)
-    toast.error(t('users.load_error') || 'Gagal memuat user')
-  }
+    allUsers.value = (res.data || []).filter((u: any) => u.id !== userCookie.value.id)
+  } catch (e) { console.error(e) }
 }
 
 // --- PERMISSIONS ---
@@ -102,44 +102,99 @@ const canManage = computed(() => {
   return userCookie.value.role === 'admin' || folder.value.userId === userCookie.value.id
 })
 
-// --- SELECTION ---
+// --- SELECTION (Files Only) ---
 const isAllSelected = computed({
   get: () => {
     if (archives.value.length === 0) return false
-    const manageableFiles = archives.value.filter(() => canManage.value)
-    return manageableFiles.length > 0 && manageableFiles.every((f: any) => selectedFileIds.value.includes(f.id))
+    const manageable = archives.value.filter(() => canManage.value)
+    return manageable.length > 0 && manageable.every((f: any) => selectedFileIds.value.includes(f.id))
   },
   set: (val) => {
-    if (val && canManage.value) {
-      selectedFileIds.value = archives.value.map((f: any) => f.id)
-    } else {
-      selectedFileIds.value = []
-    }
+    if (val && canManage.value) selectedFileIds.value = archives.value.map((f: any) => f.id)
+    else selectedFileIds.value = []
   }
 })
 
 const toggleSelection = (id: number) => {
-  if (selectedFileIds.value.includes(id)) {
-    selectedFileIds.value = selectedFileIds.value.filter(i => i !== id)
-  } else {
-    selectedFileIds.value.push(id)
+  if (selectedFileIds.value.includes(id)) selectedFileIds.value = selectedFileIds.value.filter(i => i !== id)
+  else selectedFileIds.value.push(id)
+}
+
+// --- ACTIONS: CREATE SUB-FOLDER ---
+const openCreateFolder = () => {
+  showAddDropdown.value = false
+  createFolderName.value = ''
+  showCreateFolderModal.value = true
+}
+
+const handleCreateFolder = async () => {
+  if (!createFolderName.value.trim()) return
+  startLoading(t('archives.messages.create_process') || 'Membuat Folder...')
+  try {
+    await $fetch('/api/folders/create', {
+      method: 'POST',
+      body: {
+        name: createFolderName.value,
+        parentId: folderId
+      }
+    })
+    await refresh()
+    closeModals(); await stopLoading()
+    toast.success(t('archives.messages.create_success') || 'Folder berhasil dibuat')
+  } catch (e: any) {
+    await stopLoading()
+    toast.error(t('archives.messages.create_error') || 'Gagal membuat folder')
   }
 }
 
-// --- HELPER ---
-const closeModals = () => {
-  showUploadModal.value = false; showRenameModal.value = false; showDeleteFolderConfirm.value = false
-  showDeleteFileConfirm.value = false; showShareFileModal.value = false
-  showShareFolderModal.value = false; showBulkDeleteConfirm.value = false
-  
-  newFolderName.value = ''; selectedFile.value = null; shareFileUserIds.value = []
-  shareFolderUserIds.value = []
-  uploadForm.value = { file: null, title: '' }
+// --- ACTIONS: SUB-FOLDER (EDIT & DELETE) ---
+const navigateToFolder = (subId: number) => {
+  router.push(`/dashboard/archives/${subId}`)
 }
 
-const getDownloadUrl = (filePath: string) => filePath
+const confirmDeleteSubFolder = (sub: any) => {
+  selectedSubFolder.value = sub
+  showDeleteSubFolderConfirm.value = true
+}
 
-// --- ACTIONS: FOLDER ---
+const handleDeleteSubFolder = async () => {
+  if (!selectedSubFolder.value) return
+  startLoading(t('archives.messages.delete_process') || 'Menghapus...')
+  try {
+    await $fetch(`/api/folders/${selectedSubFolder.value.id}`, { method: 'DELETE' })
+    await refresh()
+    closeModals(); await stopLoading()
+    toast.success(t('archives.messages.delete_success') || 'Folder berhasil dihapus')
+  } catch (e) {
+    await stopLoading()
+    toast.error(t('archives.messages.delete_error') || 'Gagal menghapus folder')
+  }
+}
+
+const openRenameSubFolder = (sub: any) => {
+  selectedSubFolder.value = sub
+  newSubFolderName.value = sub.name
+  showRenameSubFolderModal.value = true
+}
+
+const handleRenameSubFolder = async () => {
+  if (!selectedSubFolder.value || !newSubFolderName.value.trim()) return
+  startLoading(t('archives.messages.rename_process') || 'Mengubah nama...')
+  try {
+    await $fetch(`/api/folders/${selectedSubFolder.value.id}`, { 
+      method: 'PUT', 
+      body: { name: newSubFolderName.value } 
+    })
+    await refresh()
+    closeModals(); await stopLoading()
+    toast.success(t('archives.messages.rename_success') || 'Nama folder berhasil diubah')
+  } catch (e) {
+    await stopLoading()
+    toast.error(t('archives.messages.rename_error') || 'Gagal mengubah nama folder')
+  }
+}
+
+// --- ACTIONS: MAIN FOLDER (RENAME & DELETE) ---
 const openRename = () => { 
   if (!folder.value) return
   newFolderName.value = folder.value.name
@@ -165,6 +220,7 @@ const handleDeleteFolder = async () => {
   } catch (e) { await stopLoading(); toast.error(t('archives.messages.delete_error')) }
 }
 
+// --- ACTIONS: SHARE FOLDER ---
 const openShareFolderModal = async () => {
   if (!canManage.value) return; 
   startLoading(t('common.loading'))
@@ -184,14 +240,26 @@ const handleShareFolder = async () => {
   } catch (e: any) { await stopLoading(); toast.error(e.data?.message || t('archives.messages.share_folder_error')) }
 }
 
-// --- ACTIONS: FILE ---
+// --- ACTIONS: FILE ACTIONS ---
+const openUploadModalTrigger = () => {
+  showAddDropdown.value = false
+  showUploadModal.value = true
+}
+
 const onFileChange = (e: any) => {
   const file = e.target.files[0]
   if (file) {
-    if (file.size > 5 * 1024 * 1024) { e.target.value = null; return toast.warning(t('profile.messages.size_error')) }
+    // UPDATE: Validasi ukuran file menjadi 100MB (100 * 1024 * 1024 byte)
+    if (file.size > 100 * 1024 * 1024) { 
+      e.target.value = null; 
+      return toast.warning(t('users.modal.file_limit_info')) 
+    }
     uploadForm.value.file = file
     uploadForm.value.title = file.name.substring(0, file.name.lastIndexOf('.')) || file.name 
-  } else { uploadForm.value.file = null; uploadForm.value.title = '' }
+  } else { 
+    uploadForm.value.file = null; 
+    uploadForm.value.title = '' 
+  }
 }
 
 const handleUpload = async () => {
@@ -248,6 +316,21 @@ const handleBulkDelete = async () => {
     await refresh(); selectedFileIds.value = []; closeModals(); await stopLoading(); toast.success(t('archives.messages.bulk_delete_success'))
   } catch (e: any) { await stopLoading(); toast.error(e.data?.message || t('archives.messages.bulk_delete_error')) }
 }
+
+// --- HELPER ---
+const closeModals = () => {
+  showAddDropdown.value = false; showCreateFolderModal.value = false; showUploadModal.value = false
+  showRenameModal.value = false; showRenameSubFolderModal.value = false
+  showDeleteFolderConfirm.value = false; showDeleteSubFolderConfirm.value = false
+  showDeleteFileConfirm.value = false; showShareFileModal.value = false; showShareFolderModal.value = false
+  showBulkDeleteConfirm.value = false
+  
+  createFolderName.value = ''; newFolderName.value = ''; newSubFolderName.value = ''
+  selectedFile.value = null; selectedSubFolder.value = null
+  shareFileUserIds.value = []; shareFolderUserIds.value = []
+  uploadForm.value = { file: null, title: '' }
+}
+const getDownloadUrl = (path: string) => path
 </script>
 
 <template>
@@ -259,9 +342,7 @@ const handleBulkDelete = async () => {
     >
       
       <NuxtLink to="/dashboard/archives" class="text-xs sm:text-sm text-gray-500 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 flex items-center gap-2 mb-4 sm:mb-6 transition-all duration-300 hover:-translate-x-1 font-medium">
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
-        </svg>
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" /></svg>
         {{ $t('common.back') }}
       </NuxtLink>
       
@@ -286,11 +367,7 @@ const handleBulkDelete = async () => {
               </span>
               <span class="flex items-center gap-1 bg-white/60 dark:bg-gray-800/60 px-2 py-1 rounded-lg backdrop-blur-sm">
                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>
-                {{ folder._count?.archives || 0 }} {{ $t('archives.items') }}
-              </span>
-              <span class="flex items-center gap-1 bg-white/60 dark:bg-gray-800/60 px-2 py-1 rounded-lg backdrop-blur-sm">
-                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
-                {{ new Date(folder.createdAt).toLocaleDateString('id-ID') }}
+                {{ childrenFolders.length }} Folder, {{ folder._count?.archives || 0 }} File
               </span>
             </div>
           </div>
@@ -313,22 +390,38 @@ const handleBulkDelete = async () => {
             <input 
               v-model="search" 
               type="text" 
-              :placeholder="$t('common.search') || 'Cari file...'" 
+              :placeholder="$t('common.search')" 
               class="w-full pl-9 pr-4 py-2.5 rounded-xl border border-blue-100 dark:border-gray-700 bg-white/80 dark:bg-gray-800/80 text-gray-700 dark:text-gray-200 focus:ring-2 focus:ring-blue-500 outline-none transition-all shadow-sm backdrop-blur-sm text-sm placeholder-gray-400"
             />
-            <svg class="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
-            </svg>
+            <svg class="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
           </div>
 
           <div v-if="canManage" class="flex items-center gap-2 w-full sm:w-auto">
-            <button 
-              @click="showUploadModal = true"
-              class="group relative overflow-hidden bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700 text-white font-medium px-4 py-2 sm:px-6 sm:py-3 rounded-xl shadow-lg hover:shadow-xl transition-all duration-300 flex items-center justify-center gap-2 text-sm flex-1 sm:flex-none">
-              <svg class="w-4 h-4 sm:w-5 sm:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" /></svg>
-              {{ $t('common.upload') }}
-              <div class="absolute inset-0 bg-white/20 -translate-x-full group-hover:translate-x-full transition-transform duration-700"></div>
-            </button>
+            
+            <div class="relative add-dropdown-container w-full sm:w-auto">
+                <button 
+                  @click="showAddDropdown = !showAddDropdown"
+                  class="group relative overflow-hidden bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700 text-white font-medium px-4 py-2 sm:px-6 sm:py-3 rounded-xl shadow-lg hover:shadow-xl transition-all duration-300 flex items-center justify-center gap-2 text-sm w-full sm:w-auto cursor-pointer"
+                >
+                  <svg class="w-4 h-4 sm:w-5 sm:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                  {{ $t('common.add') }}
+                  <svg class="w-4 h-4 ml-1 transition-transform duration-200" :class="showAddDropdown ? 'rotate-180' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+                </button>
+
+                <transition enter-active-class="transition ease-out duration-200" enter-from-class="transform opacity-0 scale-95 translate-y-2" enter-to-class="transform opacity-100 scale-100 translate-y-0" leave-active-class="transition ease-in duration-150" leave-from-class="transform opacity-100 scale-100 translate-y-0" leave-to-class="transform opacity-0 scale-95 translate-y-2">
+                  <div v-if="showAddDropdown" class="absolute right-0 mt-2 w-48 bg-white dark:bg-gray-800 rounded-xl shadow-xl border border-gray-100 dark:border-gray-700 overflow-hidden ring-1 ring-black ring-opacity-5 z-50">
+                    <button @click="openCreateFolder" class="w-full text-left px-4 py-3 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 flex items-center gap-3 transition-colors">
+                      <span class="p-1.5 bg-yellow-100 dark:bg-yellow-900/30 text-yellow-600 rounded-lg"><svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg></span>
+                      {{ $t('archives.modal.create_btn') }}
+                    </button>
+                    <div class="border-t border-gray-100 dark:border-gray-700"></div>
+                    <button @click="openUploadModalTrigger" class="w-full text-left px-4 py-3 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 flex items-center gap-3 transition-colors">
+                      <span class="p-1.5 bg-blue-100 dark:bg-blue-900/30 text-blue-600 rounded-lg"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg></span>
+                      {{ $t('common.upload') }}
+                    </button>
+                  </div>
+                </transition>
+            </div>
 
             <div class="flex bg-white/70 dark:bg-gray-900/70 backdrop-blur-xl border border-blue-100 dark:border-gray-800/50 rounded-xl shadow-md overflow-hidden flex-1 sm:flex-none justify-center">
               <button @click="openShareFolderModal" class="px-3 py-2.5 text-gray-600 dark:text-gray-300 hover:bg-blue-500/10 dark:hover:bg-blue-900/20 hover:text-blue-600 dark:hover:text-blue-400 transition-all duration-300 hover:scale-110" :title="$t('common.share')">
@@ -360,6 +453,7 @@ const handleBulkDelete = async () => {
               </tr>
             </thead>
             <tbody class="divide-y divide-blue-50 dark:divide-gray-800">
+              
               <tr v-if="pending">
                 <td :colspan="canManage ? 5 : 4" class="px-6 py-16 text-center text-gray-400 dark:text-gray-500">
                   <div class="flex justify-center items-center gap-2">
@@ -369,16 +463,56 @@ const handleBulkDelete = async () => {
                 </td>
               </tr>
 
-              <tr v-else-if="archives.length === 0">
+              <tr v-else-if="archives.length === 0 && childrenFolders.length === 0">
                 <td :colspan="canManage ? 5 : 4" class="px-6 py-16 text-center text-gray-500 dark:text-gray-400">
                   <div class="w-14 h-14 mx-auto mb-3 opacity-50 animate-pulse bg-blue-50 dark:bg-gray-800 rounded-full flex items-center justify-center">
                     <svg class="w-7 h-7 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 7h18M3 12h18M3 17h18"/></svg>
                   </div>
-                  <p class="text-sm font-medium">{{ search ? $t('archives.table.empty_folder') : $t('archives.table.empty_folder') }}</p>
+                  <p class="text-sm font-medium">{{ search ? $t('archives.table.empty_search') : $t('archives.table.empty_folder') }}</p>
                 </td>
               </tr>
               
-              <tr v-for="file in archives" :key="file.id" class="hover:bg-blue-50/50 dark:hover:bg-blue-900/10 transition-all duration-300 group">
+              <tr v-for="sub in childrenFolders" :key="'sub-'+sub.id" class="hover:bg-blue-50/50 dark:hover:bg-blue-900/10 transition-all duration-300 group">
+                <td v-if="canManage" class="px-6 py-4 text-center"><span class="block w-4 h-4"></span></td>
+
+                <td class="px-6 py-4">
+                  <button @click="navigateToFolder(sub.id)" class="flex items-center gap-3 group-hover:translate-x-1 transition-transform duration-200 text-left w-full">
+                    <div class="w-9 h-9 bg-yellow-100 dark:bg-yellow-900/30 rounded-lg flex items-center justify-center text-yellow-600 dark:text-yellow-500 shrink-0 shadow-sm border border-yellow-200 dark:border-yellow-800/30">
+                      <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
+                    </div>
+                    <div>
+                      <p class="font-bold text-gray-800 dark:text-gray-200 text-sm group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">{{ sub.name }}</p>
+                      <p class="text-[10px] text-gray-500 dark:text-gray-400">Sub-folder</p>
+                    </div>
+                  </button>
+                </td>
+                
+                <td class="px-6 py-4">
+                  <div class="flex items-center gap-2">
+                    <div class="w-7 h-7 rounded-full bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 text-[10px] font-bold flex items-center justify-center">
+                      {{ sub.user?.name?.charAt(0).toUpperCase() || '?' }}
+                    </div>
+                    <div><p class="text-xs font-medium text-gray-700 dark:text-gray-300">{{ sub.user?.name }}</p></div>
+                  </div>
+                </td>
+
+                <td class="px-6 py-4">
+                  <span class="inline-flex px-2.5 py-1 rounded-lg text-[10px] font-semibold bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-700">{{ sub._count?.archives || 0 }} {{ $t('archives.items') }}</span>
+                </td>
+                
+                <td class="px-6 py-4 text-center">
+                  <div v-if="canManage" class="flex justify-center gap-2 opacity-80 group-hover:opacity-100 transition-opacity">
+                    <button @click="openRenameSubFolder(sub)" class="p-2 bg-amber-50 hover:bg-amber-100 text-amber-600 dark:bg-amber-900/20 dark:text-amber-400 dark:hover:bg-amber-900/40 rounded-lg transition-all hover:scale-110 shadow-sm border border-amber-100 dark:border-amber-800/30" :title="$t('common.edit')">
+                      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/></svg>
+                    </button>
+                    <button @click="confirmDeleteSubFolder(sub)" class="p-2 bg-red-50 hover:bg-red-100 text-red-600 dark:bg-red-900/20 dark:text-red-400 dark:hover:bg-red-900/40 rounded-lg transition-all hover:scale-110 shadow-sm border border-red-100 dark:border-red-800/30" :title="$t('common.delete')">
+                      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2.5 2.5 0 0116.138 21H7.862a2.5 2.5 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1H9a1 1 0 00-1 1v3M4 7h16" /></svg>
+                    </button>
+                  </div>
+                </td>
+              </tr>
+
+              <tr v-for="file in archives" :key="'file-'+file.id" class="hover:bg-blue-50/50 dark:hover:bg-blue-900/10 transition-all duration-300 group">
                 <td v-if="canManage" class="px-6 py-4 text-center">
                    <input type="checkbox" :checked="selectedFileIds.includes(file.id)" @change="toggleSelection(file.id)" class="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600" />
                 </td>
@@ -414,20 +548,20 @@ const handleBulkDelete = async () => {
                 </td>
                 
                 <td class="px-6 py-4 text-center">
-                  <div v-if="canManage" class="flex justify-center gap-2 opacity-80 group-hover:opacity-100 transition-opacity">
+                  <div class="flex justify-center gap-2 opacity-80 group-hover:opacity-100 transition-opacity">
                     <a :href="getDownloadUrl(file.filePath)" target="_blank" download class="p-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-600 dark:bg-emerald-900/20 dark:text-emerald-400 dark:hover:bg-emerald-900/40 rounded-lg transition-all hover:scale-110 shadow-sm border border-emerald-100 dark:border-emerald-800/30" :title="$t('common.download')">
                       <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
                     </a>
                     
-                    <button @click="openShareFileModal(file)" class="p-2 bg-blue-50 hover:bg-blue-100 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400 dark:hover:bg-blue-900/40 rounded-lg transition-all hover:scale-110 shadow-sm border border-blue-100 dark:border-blue-800/30" :title="$t('common.share')">
-                      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.102 1.101" /></svg>
-                    </button>
-
-                    <button @click="confirmDeleteFile(file)" class="p-2 bg-red-50 hover:bg-red-100 text-red-600 dark:bg-red-900/20 dark:text-red-400 dark:hover:bg-red-900/40 rounded-lg transition-all hover:scale-110 shadow-sm border border-red-100 dark:border-red-800/30" :title="$t('common.delete')">
-                      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2.5 2.5 0 0116.138 21H7.862a2.5 2.5 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1H9a1 1 0 00-1 1v3M4 7h16" /></svg>
-                    </button>
+                    <template v-if="canManage">
+                      <button @click="openShareFileModal(file)" class="p-2 bg-blue-50 hover:bg-blue-100 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400 dark:hover:bg-blue-900/40 rounded-lg transition-all hover:scale-110 shadow-sm border border-blue-100 dark:border-blue-800/30" :title="$t('common.share')">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.102 1.101" /></svg>
+                      </button>
+                      <button @click="confirmDeleteFile(file)" class="p-2 bg-red-50 hover:bg-red-100 text-red-600 dark:bg-red-900/20 dark:text-red-400 dark:hover:bg-red-900/40 rounded-lg transition-all hover:scale-110 shadow-sm border border-red-100 dark:border-red-800/30" :title="$t('common.delete')">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2.5 2.5 0 0116.138 21H7.862a2.5 2.5 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1H9a1 1 0 00-1 1v3M4 7h16" /></svg>
+                      </button>
+                    </template>
                   </div>
-                  <span v-else class="text-[10px] text-gray-400 italic">{{ $t('common.read_only') }}</span>
                 </td>
               </tr>
             </tbody>
@@ -438,25 +572,12 @@ const handleBulkDelete = async () => {
           <span class="text-xs text-gray-500 dark:text-gray-400 font-medium">
             {{ $t('archives.pagination.showing', { start: (meta.page - 1) * limit + 1, end: Math.min(meta.page * limit, meta.total), total: meta.total }) }}
           </span>
-
           <div class="flex items-center gap-2">
-            <button 
-              @click="changePage(meta.page - 1)" 
-              :disabled="meta.page === 1"
-              class="p-2 rounded-lg border border-blue-200 dark:border-gray-600 hover:bg-blue-50 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-gray-600 dark:text-gray-300"
-            >
+            <button @click="changePage(meta.page - 1)" :disabled="meta.page === 1" class="p-2 rounded-lg border border-blue-200 dark:border-gray-600 hover:bg-blue-50 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-gray-600 dark:text-gray-300">
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
             </button>
-
-            <span class="text-xs font-semibold text-gray-700 dark:text-gray-300 mx-2">
-              {{ $t('archives.pagination.page', { current: meta.page, total: meta.totalPages }) }}
-            </span>
-
-            <button 
-              @click="changePage(meta.page + 1)" 
-              :disabled="meta.page === meta.totalPages"
-              class="p-2 rounded-lg border border-blue-200 dark:border-gray-600 hover:bg-blue-50 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-gray-600 dark:text-gray-300"
-            >
+            <span class="text-xs font-semibold text-gray-700 dark:text-gray-300 mx-2">{{ $t('archives.pagination.page', { current: meta.page, total: meta.totalPages }) }}</span>
+            <button @click="changePage(meta.page + 1)" :disabled="meta.page === meta.totalPages" class="p-2 rounded-lg border border-blue-200 dark:border-gray-600 hover:bg-blue-50 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-gray-600 dark:text-gray-300">
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
             </button>
           </div>
@@ -464,8 +585,47 @@ const handleBulkDelete = async () => {
       </div>
     </div>
 
-    <Transition enter-active-class="transition duration-300 ease-out" enter-from-class="opacity-0" enter-to-class="opacity-100" leave-active-class="transition duration-200 ease-in" leave-from-class="opacity-100" leave-to-class="opacity-0">
-      <div v-if="showUploadModal || showRenameModal || showDeleteFolderConfirm || showDeleteFileConfirm || showShareFileModal || showShareFolderModal || showBulkDeleteConfirm" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-40" @click="closeModals"></div>
+    <Transition enter-active-class="transition duration-400 cubic-bezier(0.16, 1, 0.3, 1)" enter-from-class="opacity-0 scale-95 translate-y-8" enter-to-class="opacity-100 scale-100 translate-y-0" leave-active-class="transition duration-300 ease-in" leave-from-class="opacity-100 scale-100 translate-y-0" leave-to-class="opacity-0 scale-95 translate-y-8">
+      <div v-if="showCreateFolderModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
+        <div class="bg-white dark:bg-gray-900 rounded-[1.5rem] shadow-2xl border border-gray-100 dark:border-gray-800 w-full max-w-sm sm:max-w-md p-6 relative pointer-events-auto overflow-hidden">
+          <div class="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-yellow-500 to-amber-500"></div>
+          <h3 class="text-lg font-bold mb-5 text-gray-900 dark:text-white">{{ $t('archives.modal.create_title') }}</h3>
+          <input v-model="createFolderName" type="text" :placeholder="$t('archives.modal.folder_name_placeholder')" class="w-full px-4 py-3 bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-yellow-500/40 transition-all text-sm" autoFocus @keyup.enter="handleCreateFolder" />
+          <div class="flex gap-3 mt-6">
+            <button @click="closeModals" class="flex-1 py-2.5 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition text-xs font-medium">{{ $t('common.cancel') }}</button>
+            <button @click="handleCreateFolder" class="flex-1 py-2.5 bg-gradient-to-r from-yellow-500 to-amber-600 hover:from-yellow-600 hover:to-amber-700 text-white rounded-lg shadow-md transition text-xs font-medium">{{ $t('common.add') }}</button>
+          </div>
+        </div>
+      </div>
+    </Transition>
+
+    <Transition enter-active-class="transition duration-400 cubic-bezier(0.16, 1, 0.3, 1)" enter-from-class="opacity-0 scale-95 translate-y-8" enter-to-class="opacity-100 scale-100 translate-y-0" leave-active-class="transition duration-300 ease-in" leave-from-class="opacity-100 scale-100 translate-y-0" leave-to-class="opacity-0 scale-95 translate-y-8">
+      <div v-if="showRenameSubFolderModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
+        <div class="bg-white dark:bg-gray-900 rounded-[1.5rem] shadow-2xl border border-gray-100 dark:border-gray-800 w-full max-w-sm sm:max-w-md p-6 relative pointer-events-auto overflow-hidden">
+          <div class="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-amber-500 to-orange-500"></div>
+          <h3 class="text-lg font-bold mb-5 text-gray-900 dark:text-white">{{ $t('archives.modal.rename_title') }}</h3>
+          <input v-model="newSubFolderName" type="text" class="w-full px-4 py-3 bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500/40 transition-all text-sm" autoFocus @keyup.enter="handleRenameSubFolder"/>
+          <div class="flex gap-3 mt-6">
+            <button @click="closeModals" class="flex-1 py-2.5 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition text-xs font-medium">{{ $t('common.cancel') }}</button>
+            <button @click="handleRenameSubFolder" class="flex-1 py-2.5 bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 text-white rounded-lg shadow-md transition text-xs font-medium">{{ $t('common.save') }}</button>
+          </div>
+        </div>
+      </div>
+    </Transition>
+
+    <Transition enter-active-class="transition duration-400 cubic-bezier(0.16, 1, 0.3, 1)" enter-from-class="opacity-0 scale-95 translate-y-8" enter-to-class="opacity-100 scale-100 translate-y-0" leave-active-class="transition duration-300 ease-in" leave-from-class="opacity-100 scale-100 translate-y-0" leave-to-class="opacity-0 scale-95 translate-y-8">
+      <div v-if="showDeleteSubFolderConfirm" class="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
+        <div class="bg-white dark:bg-gray-900 rounded-[1.5rem] shadow-2xl border border-gray-100 dark:border-gray-800 max-w-xs sm:max-w-sm w-full p-6 text-center relative pointer-events-auto overflow-hidden">
+          <div class="absolute top-0 left-0 w-full h-1.5 bg-red-500"></div>
+          <div class="w-14 h-14 mx-auto mb-4 bg-red-50 dark:bg-red-900/20 rounded-full flex items-center justify-center text-2xl text-red-600">🗑️</div>
+          <h3 class="text-lg font-bold text-gray-900 dark:text-white mb-2">{{ $t('archives.modal.delete_title') }}</h3>
+          <p class="text-xs text-gray-500 mb-6">Folder <strong class="text-red-600">{{ selectedSubFolder?.name }}</strong> {{ $t('archives.modal.delete_desc') }}</p>
+          <div class="flex gap-3">
+            <button @click="closeModals" class="flex-1 py-2.5 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition text-xs font-medium">{{ $t('common.cancel') }}</button>
+            <button @click="handleDeleteSubFolder" class="flex-1 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-lg shadow-md transition text-xs font-medium">{{ $t('common.delete') }}</button>
+          </div>
+        </div>
+      </div>
     </Transition>
 
     <Transition enter-active-class="transition duration-400 cubic-bezier(0.16, 1, 0.3, 1)" enter-from-class="opacity-0 scale-95 translate-y-8" enter-to-class="opacity-100 scale-100 translate-y-0" leave-active-class="transition duration-300 ease-in" leave-from-class="opacity-100 scale-100 translate-y-0" leave-to-class="opacity-0 scale-95 translate-y-8">
@@ -498,60 +658,6 @@ const handleBulkDelete = async () => {
               <button type="submit" class="flex-1 py-2.5 bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700 text-white rounded-lg shadow-md transition text-xs font-medium">{{ $t('common.upload') }}</button>
             </div>
           </form>
-        </div>
-      </div>
-    </Transition>
-    
-    <Transition enter-active-class="transition duration-400 cubic-bezier(0.16, 1, 0.3, 1)" enter-from-class="opacity-0 scale-95 translate-y-8" enter-to-class="opacity-100 scale-100 translate-y-0" leave-active-class="transition duration-300 ease-in" leave-from-class="opacity-100 scale-100 translate-y-0" leave-to-class="opacity-0 scale-95 translate-y-8">
-      <div v-if="showShareFileModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
-        <div class="bg-white dark:bg-gray-900 rounded-[1.5rem] shadow-2xl border border-gray-100 dark:border-gray-800 w-full max-w-sm sm:max-w-md p-6 flex flex-col max-h-[80vh] relative pointer-events-auto overflow-hidden">
-          <div class="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-blue-500 to-cyan-500"></div>
-          <div class="flex justify-between items-center mb-4">
-            <h3 class="text-lg font-bold text-gray-900 dark:text-white truncate max-w-[80%]">{{ $t('archives.modal.share_file_title', { title: selectedFile?.title }) }}</h3>
-            <button @click="showShareFileModal = false" class="text-gray-400 hover:text-gray-600 transition"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg></button>
-          </div>
-          <p class="text-xs text-gray-500 mb-4">{{ $t('archives.modal.share_file_desc') }}</p>
-          <div class="flex-1 overflow-y-auto border border-gray-100 dark:border-gray-800 rounded-xl p-2 mb-4 bg-gray-50/50 dark:bg-gray-800/30">
-            <div v-if="allUsers.length === 0" class="text-center py-4 text-gray-400 italic text-xs">{{ $t('archives.modal.no_users') }}</div>
-            <label v-for="u in allUsers" :key="u.id" class="flex items-center gap-3 p-2.5 hover:bg-white dark:hover:bg-gray-800 rounded-lg cursor-pointer transition border border-transparent hover:border-gray-100 dark:hover:border-gray-700">
-              <input type="checkbox" :value="u.id" v-model="shareFileUserIds" class="w-4 h-4 text-blue-600 rounded focus:ring-blue-500/50 border-gray-300">
-              <div class="flex items-center gap-2">
-                <div class="w-7 h-7 rounded-full bg-gradient-to-br from-blue-500 to-cyan-500 text-white text-[10px] font-bold flex items-center justify-center">{{ u.name.charAt(0).toUpperCase() }}</div>
-                <div><div class="text-xs font-medium text-gray-900 dark:text-white">{{ u.name }}</div><div class="text-[10px] text-gray-500 capitalize">{{ u.role || 'user' }}</div></div>
-              </div>
-            </label>
-          </div>
-          <div class="flex gap-2">
-            <button @click="closeModals" class="flex-1 py-2.5 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition text-xs font-medium">{{ $t('common.cancel') }}</button>
-            <button @click="handleShareFile" class="flex-1 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg shadow-md transition text-xs font-medium">{{ $t('common.save') }}</button>
-          </div>
-        </div>
-      </div>
-    </Transition>
-
-    <Transition enter-active-class="transition duration-400 cubic-bezier(0.16, 1, 0.3, 1)" enter-from-class="opacity-0 scale-95 translate-y-8" enter-to-class="opacity-100 scale-100 translate-y-0" leave-active-class="transition duration-300 ease-in" leave-from-class="opacity-100 scale-100 translate-y-0" leave-to-class="opacity-0 scale-95 translate-y-8">
-      <div v-if="showShareFolderModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
-        <div class="bg-white dark:bg-gray-900 rounded-[1.5rem] shadow-2xl border border-gray-100 dark:border-gray-800 w-full max-w-sm sm:max-w-md p-6 flex flex-col max-h-[80vh] relative pointer-events-auto overflow-hidden">
-          <div class="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-blue-500 to-cyan-500"></div>
-          <div class="flex justify-between items-center mb-4">
-            <h3 class="text-lg font-bold text-gray-900 dark:text-white truncate max-w-[80%]">{{ $t('archives.modal.share_folder_title', { name: folder?.name }) }}</h3>
-            <button @click="showShareFolderModal = false" class="text-gray-400 hover:text-gray-600 transition"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg></button>
-          </div>
-          <p class="text-xs text-gray-500 mb-4">{{ $t('archives.modal.share_folder_desc') }}</p>
-          <div class="flex-1 overflow-y-auto border border-gray-100 dark:border-gray-800 rounded-xl p-2 mb-4 bg-gray-50/50 dark:bg-gray-800/30">
-            <div v-if="allUsers.length === 0" class="text-center py-4 text-gray-400 italic text-xs">{{ $t('archives.modal.no_users') }}</div>
-            <label v-for="u in allUsers" :key="u.id" class="flex items-center gap-3 p-2.5 hover:bg-white dark:hover:bg-gray-800 rounded-lg cursor-pointer transition border border-transparent hover:border-gray-100 dark:hover:border-gray-700">
-              <input type="checkbox" :value="u.id" v-model="shareFolderUserIds" class="w-4 h-4 text-blue-600 rounded focus:ring-blue-500/50 border-gray-300">
-              <div class="flex items-center gap-2">
-                <div class="w-7 h-7 rounded-full bg-gradient-to-br from-blue-500 to-cyan-500 text-white text-[10px] font-bold flex items-center justify-center">{{ u.name.charAt(0).toUpperCase() }}</div>
-                <div><div class="text-xs font-medium text-gray-900 dark:text-white">{{ u.name }}</div><div class="text-[10px] text-gray-500 capitalize">{{ u.role || 'user' }}</div></div>
-              </div>
-            </label>
-          </div>
-          <div class="flex gap-2">
-            <button @click="closeModals" class="flex-1 py-2.5 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition text-xs font-medium">{{ $t('common.cancel') }}</button>
-            <button @click="handleShareFolder" class="flex-1 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg shadow-md transition text-xs font-medium">{{ $t('common.save') }}</button>
-          </div>
         </div>
       </div>
     </Transition>
@@ -613,6 +719,64 @@ const handleBulkDelete = async () => {
           </div>
         </div>
       </div>
+    </Transition>
+
+    <Transition enter-active-class="transition duration-400 cubic-bezier(0.16, 1, 0.3, 1)" enter-from-class="opacity-0 scale-95 translate-y-8" enter-to-class="opacity-100 scale-100 translate-y-0" leave-active-class="transition duration-300 ease-in" leave-from-class="opacity-100 scale-100 translate-y-0" leave-to-class="opacity-0 scale-95 translate-y-8">
+      <div v-if="showShareFileModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
+        <div class="bg-white dark:bg-gray-900 rounded-[1.5rem] shadow-2xl border border-gray-100 dark:border-gray-800 w-full max-w-sm sm:max-w-md p-6 flex flex-col max-h-[80vh] relative pointer-events-auto overflow-hidden">
+          <div class="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-blue-500 to-cyan-500"></div>
+          <div class="flex justify-between items-center mb-4">
+            <h3 class="text-lg font-bold text-gray-900 dark:text-white truncate max-w-[80%]">{{ $t('archives.modal.share_file_title', { title: selectedFile?.title }) }}</h3>
+            <button @click="showShareFileModal = false" class="text-gray-400 hover:text-gray-600 transition"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg></button>
+          </div>
+          <p class="text-xs text-gray-500 mb-4">{{ $t('archives.modal.share_file_desc') }}</p>
+          <div class="flex-1 overflow-y-auto border border-gray-100 dark:border-gray-800 rounded-xl p-2 mb-4 bg-gray-50/50 dark:bg-gray-800/30">
+            <div v-if="allUsers.length === 0" class="text-center py-4 text-gray-400 italic text-xs">{{ $t('archives.modal.no_users') }}</div>
+            <label v-for="u in allUsers" :key="u.id" class="flex items-center gap-3 p-2.5 hover:bg-white dark:hover:bg-gray-800 rounded-lg cursor-pointer transition border border-transparent hover:border-gray-100 dark:hover:border-gray-700">
+              <input type="checkbox" :value="u.id" v-model="shareFileUserIds" class="w-4 h-4 text-blue-600 rounded focus:ring-blue-500/50 border-gray-300">
+              <div class="flex items-center gap-2">
+                <div class="w-7 h-7 rounded-full bg-gradient-to-br from-blue-500 to-cyan-500 text-white text-[10px] font-bold flex items-center justify-center">{{ u.name.charAt(0).toUpperCase() }}</div>
+                <div><div class="text-xs font-medium text-gray-900 dark:text-white">{{ u.name }}</div><div class="text-[10px] text-gray-500 capitalize">{{ u.role || 'user' }}</div></div>
+              </div>
+            </label>
+          </div>
+          <div class="flex gap-2">
+            <button @click="closeModals" class="flex-1 py-2.5 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition text-xs font-medium">{{ $t('common.cancel') }}</button>
+            <button @click="handleShareFile" class="flex-1 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg shadow-md transition text-xs font-medium">{{ $t('common.save') }}</button>
+          </div>
+        </div>
+      </div>
+    </Transition>
+
+    <Transition enter-active-class="transition duration-400 cubic-bezier(0.16, 1, 0.3, 1)" enter-from-class="opacity-0 scale-95 translate-y-8" enter-to-class="opacity-100 scale-100 translate-y-0" leave-active-class="transition duration-300 ease-in" leave-from-class="opacity-100 scale-100 translate-y-0" leave-to-class="opacity-0 scale-95 translate-y-8">
+      <div v-if="showShareFolderModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
+        <div class="bg-white dark:bg-gray-900 rounded-[1.5rem] shadow-2xl border border-gray-100 dark:border-gray-800 w-full max-w-sm sm:max-w-md p-6 flex flex-col max-h-[80vh] relative pointer-events-auto overflow-hidden">
+          <div class="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-blue-500 to-cyan-500"></div>
+          <div class="flex justify-between items-center mb-4">
+            <h3 class="text-lg font-bold text-gray-900 dark:text-white truncate max-w-[80%]">{{ $t('archives.modal.share_folder_title', { name: folder?.name }) }}</h3>
+            <button @click="showShareFolderModal = false" class="text-gray-400 hover:text-gray-600 transition"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg></button>
+          </div>
+          <p class="text-xs text-gray-500 mb-4">{{ $t('archives.modal.share_folder_desc') }}</p>
+          <div class="flex-1 overflow-y-auto border border-gray-100 dark:border-gray-800 rounded-xl p-2 mb-4 bg-gray-50/50 dark:bg-gray-800/30">
+            <div v-if="allUsers.length === 0" class="text-center py-4 text-gray-400 italic text-xs">{{ $t('archives.modal.no_users') }}</div>
+            <label v-for="u in allUsers" :key="u.id" class="flex items-center gap-3 p-2.5 hover:bg-white dark:hover:bg-gray-800 rounded-lg cursor-pointer transition border border-transparent hover:border-gray-100 dark:hover:border-gray-700">
+              <input type="checkbox" :value="u.id" v-model="shareFolderUserIds" class="w-4 h-4 text-blue-600 rounded focus:ring-blue-500/50 border-gray-300">
+              <div class="flex items-center gap-2">
+                <div class="w-7 h-7 rounded-full bg-gradient-to-br from-blue-500 to-cyan-500 text-white text-[10px] font-bold flex items-center justify-center">{{ u.name.charAt(0).toUpperCase() }}</div>
+                <div><div class="text-xs font-medium text-gray-900 dark:text-white">{{ u.name }}</div><div class="text-[10px] text-gray-500 capitalize">{{ u.role || 'user' }}</div></div>
+              </div>
+            </label>
+          </div>
+          <div class="flex gap-2">
+            <button @click="closeModals" class="flex-1 py-2.5 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition text-xs font-medium">{{ $t('common.cancel') }}</button>
+            <button @click="handleShareFolder" class="flex-1 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg shadow-md transition text-xs font-medium">{{ $t('common.save') }}</button>
+          </div>
+        </div>
+      </div>
+    </Transition>
+
+    <Transition enter-active-class="transition duration-300 ease-out" enter-from-class="opacity-0" enter-to-class="opacity-100" leave-active-class="transition duration-200 ease-in" leave-from-class="opacity-100" leave-to-class="opacity-0">
+      <div v-if="showUploadModal || showRenameModal || showRenameSubFolderModal || showDeleteFolderConfirm || showDeleteSubFolderConfirm || showDeleteFileConfirm || showShareFileModal || showShareFolderModal || showBulkDeleteConfirm || showCreateFolderModal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-40" @click="closeModals"></div>
     </Transition>
 
   </div>

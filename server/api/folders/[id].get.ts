@@ -14,7 +14,7 @@ export default defineEventHandler(async (event) => {
 
   if (!currentUserId) throw createError({ statusCode: 401, message: 'Unauthorized' })
 
-  // --- 1. Ambil Parameter Pagination & Search ---
+  // Ambil Parameter Pagination & Search
   const { page, limit, search } = getQuery(event)
   const pageNumber = page ? parseInt(String(page)) : 1
   const limitNumber = limit ? parseInt(String(limit)) : 10
@@ -22,12 +22,11 @@ export default defineEventHandler(async (event) => {
   const searchQuery = search ? String(search) : ''
 
   try {
-    // --- 2. Cek Eksistensi Folder & Hak Akses (Query Ringan) ---
+    // 1. Cek Folder Dasar & Hak Akses
+    // Kita cek apakah user punya akses ke folder ini (sebagai Owner, Admin, atau Shared User)
     const folderBasic = await prisma.folder.findUnique({
       where: { id: folderId },
-      include: {
-        shares: { select: { userId: true } }
-      }
+      include: { shares: { select: { userId: true } } }
     })
     
     if (!folderBasic) throw createError({ statusCode: 404, message: 'Folder tidak ditemukan' })
@@ -36,40 +35,78 @@ export default defineEventHandler(async (event) => {
     const isAdmin = user.role === 'admin'
     const isShared = folderBasic.shares.some(s => s.userId === currentUserId)
 
+    // Jika bukan Owner, bukan Admin, dan tidak dikasih akses Folder -> Tolak
     if (!isOwner && !isAdmin && !isShared) {
       throw createError({ statusCode: 403, message: 'Akses ditolak' })
     }
 
-    // --- 3. Bangun Query Filter Arsip ---
+    // 2. Bangun Query Filter (Advanced)
+    // Gunakan array AND untuk menggabungkan berbagai kondisi filter agar aman dan tidak saling menimpa
     const archiveWhere: any = {
-      folderId: folderId
+      folderId: folderId,
+      AND: [] 
     }
 
-    // A. Filter Search (Jika ada)
-    if (searchQuery) {
-      archiveWhere.OR = [
-        { title: { contains: searchQuery } },
-        { fileType: { contains: searchQuery } },
-        { uploader: { name: { contains: searchQuery } } }
-      ]
+    const childrenWhere: any = {
+      parentId: folderId,
+      AND: []
     }
 
-    // B. Filter Hak Akses File (Jika user biasa & bukan owner folder)
+    // [LOGIKA UTAMA: RESTRIKSI FILE DALAM FOLDER YANG DISHARE]
+    // Jika user bukan pemilik folder dan bukan admin (berarti dia adalah Viewer/Editor tamu),
+    // Maka HANYA tampilkan file yang:
+    // 1. Di-upload oleh user itu sendiri, ATAU
+    // 2. Secara eksplisit dibagikan ke user tersebut (ada di tabel fileShares)
     if (!isOwner && !isAdmin) {
-      archiveWhere.fileShares = {
-        some: { userId: currentUserId }
-      }
+      archiveWhere.AND.push({
+        OR: [
+          { uploaderId: currentUserId }, // File milik sendiri
+          { fileShares: { some: { userId: currentUserId } } } // File yang dishare spesifik ke user
+        ]
+      })
     }
 
-    // --- 4. Eksekusi Query (Transaction: Count & Data) ---
+    // Filter Search (Jika ada pencarian)
+    if (searchQuery) {
+      // Search untuk File
+      archiveWhere.AND.push({
+        OR: [
+          { title: { contains: searchQuery } },
+          { fileType: { contains: searchQuery } },
+          { uploader: { name: { contains: searchQuery } } }
+        ]
+      })
+
+      // Search untuk Sub-folder
+      childrenWhere.AND.push({
+        name: { contains: searchQuery }
+      })
+    }
+
+    // Bersihkan AND kosong (opsional, untuk kebersihan query)
+    if (archiveWhere.AND.length === 0) delete archiveWhere.AND
+    if (childrenWhere.AND.length === 0) delete childrenWhere.AND
+
+    // 3. Eksekusi Query Database
     const [totalArchives, folderData] = await prisma.$transaction([
-      // Hitung total data sesuai filter (untuk pagination)
+      // Hitung total file yang sesuai filter (untuk pagination)
       prisma.archive.count({ where: archiveWhere }),
       
-      // Ambil data folder beserta arsip yang sudah dipaginasi
+      // Ambil data folder & isinya
       prisma.folder.findUnique({
         where: { id: folderId },
         include: {
+          // Sub-folders
+          children: {
+            where: childrenWhere,
+            orderBy: { createdAt: 'desc' },
+            include: {
+              user: { select: { name: true } },
+              _count: { select: { archives: true } }
+            }
+          },
+
+          // Files (Archives) - Akan mengikuti filter archiveWhere yang ketat di atas
           archives: {
             where: archiveWhere,
             skip: skip,
@@ -77,7 +114,7 @@ export default defineEventHandler(async (event) => {
             orderBy: { createdAt: 'desc' },
             include: {
               uploader: { select: { name: true } },
-              fileShares: { select: { userId: true } } // Diperlukan untuk logika frontend (checkbox share)
+              fileShares: { select: { userId: true } }
             }
           },
           user: { select: { id: true, name: true, email: true } },
@@ -87,11 +124,11 @@ export default defineEventHandler(async (event) => {
       })
     ])
 
-    if (!folderData) throw createError({ statusCode: 404, message: 'Folder data error' })
+    if (!folderData) throw createError({ statusCode: 404, message: 'Data folder tidak ditemukan' })
 
-    // --- 5. Return Response dengan Meta Pagination ---
+    // 4. Return Response
     return {
-      folder: folderData, // Folder object yang berisi arsip (halaman ini saja)
+      folder: folderData,
       meta: {
         total: totalArchives,
         page: pageNumber,
@@ -101,6 +138,7 @@ export default defineEventHandler(async (event) => {
     }
 
   } catch (error: any) {
-    throw createError({ statusCode: error.statusCode || 500, message: error.message })
+    console.error('API Error:', error)
+    throw createError({ statusCode: error.statusCode || 500, message: error.message || 'Internal Server Error' })
   }
 })

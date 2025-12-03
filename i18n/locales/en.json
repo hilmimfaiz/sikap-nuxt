@@ -170,7 +170,7 @@
       "import_guide": "Import Guide:",
       "import_guide_1": "Columns: Name, Email, Password, Role",
       "import_guide_2": "Role must be: admin, editor, or viewer.",
-      "file_limit_info": "Max 5MB"
+      "file_limit_info": "Max 100MB"
     },
     "messages": {
       "create_process": "Adding User...",
@@ -353,7 +353,7 @@
       "title_placeholder": "Matches original filename",
       "file_label": "File",
       "title_label": "File Title",
-      "file_placeholder": "Click or drag file here",
+      "file_placeholder": "Click or drag file here (max 100MB)",
       "create_btn": "Create Folder",
       "delete_desc": "will be permanently deleted along with its contents.",
       "delete_file_desc": "will be permanently deleted.",

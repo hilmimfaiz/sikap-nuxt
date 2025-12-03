@@ -170,7 +170,7 @@
       "import_guide": "Panduan Import:",
       "import_guide_1": "Kolom: Name, Email, Password, Role",
       "import_guide_2": "Role harus: admin, editor, atau viewer.",
-      "file_limit_info": "Maksimal 5MB"
+      "file_limit_info": "Maksimal 100MB"
     },
     "messages": {
       "create_process": "Menambahkan User...",
@@ -336,7 +336,8 @@
       "name": "Nama Dokumen",
       "uploader": "Pengupload",
       "size": "Ukuran",
-      "empty_folder": "Folder ini masih kosong."
+      "empty_folder": "Folder ini masih kosong.",
+      "empty_search": "Pencarian tidak ditemukan."
     },
     "modal": {
       "create_title": "Buat Folder Baru",
@@ -353,7 +354,7 @@
       "title_placeholder": "Sesuai nama file asli",
       "title_label": "Judul File",
       "file_label": "File",
-      "file_placeholder": "Drag & drop atau klik untuk pilih file (max 5MB)",
+      "file_placeholder": "Drag & drop atau klik untuk pilih file (max 100MB)",
       "create_btn": "Buat Folder",
       "delete_desc": "akan dihapus permanen beserta isinya.",
       "delete_file_desc": "akan dihapus permanen.",

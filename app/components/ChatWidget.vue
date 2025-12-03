@@ -1,9 +1,8 @@
 <script setup lang="ts">
 import { ref, watch, nextTick, computed, onMounted, onUnmounted } from 'vue'
 
-// Menggunakan composable suara
+// --- COMPOSABLES ---
 const { playNotificationSound } = useSound()
-
 const { 
   isOpen, 
   toggleChat, 
@@ -18,8 +17,9 @@ const {
 const userCookie = useCookie<any>('user_data')
 const currentUser = userCookie.value
 const { t } = useI18n()
-const toast = useToast() // Menggunakan toast untuk feedback
+const toast = useToast()
 
+// --- STATE ---
 const messageInput = ref('')
 const messagesContainer = ref<HTMLElement | null>(null)
 const isSending = ref(false)
@@ -32,6 +32,11 @@ let pollingInterval: NodeJS.Timer | null = null
 // --- STATE MODAL HAPUS ---
 const showDeleteConfirm = ref(false)
 const msgToDelete = ref<any>(null)
+
+// --- COMPUTED: TOTAL UNREAD (Badge Merah Utama) ---
+const totalUnread = computed(() => {
+  return conversations.value.reduce((sum, conv) => sum + (conv.unreadCount || 0), 0)
+})
 
 // --- SCROLLING ---
 const scrollToBottom = async (smooth = true) => {
@@ -69,58 +74,71 @@ const fetchMessages = async () => {
     const lastLocalMsg = messages.value[messages.value.length - 1]
     const lastServerMsg = data[data.length - 1]
 
-    // Cek perubahan data
     if (data.length !== messages.value.length || lastLocalMsg?.id !== lastServerMsg?.id) {
-      
       const isAtBottom = messagesContainer.value 
         ? (messagesContainer.value.scrollHeight - messagesContainer.value.scrollTop <= messagesContainer.value.clientHeight + 150)
         : true
 
-      // --- LOGIKA NOTIFIKASI SUARA ---
-      // Jika ada pesan baru dari server dan pengirimnya bukan user yang sedang login
+      // Bunyi notifikasi jika ada pesan baru dari orang lain
       if (lastServerMsg && lastServerMsg.senderId !== currentUser.id) {
-         // Cek apakah pesan benar-benar bertambah (menghindari bunyi saat re-fetch inisial)
          if (data.length > messages.value.length) {
             playNotificationSound()
          }
       }
-      // -------------------------------
 
       messages.value = data
       
+      // Jika chat sedang terbuka, tandai sebagai terbaca
+      if (isOpen.value && activeConversation.value) {
+        markAsRead(activeConversation.value.partnerId)
+      }
+
       if (isAtBottom) scrollToBottom()
     }
   } catch (e) { console.error(e) }
 }
 
+// --- LOGIKA READ MESSAGE ---
+const markAsRead = async (partnerId: number) => {
+  // 1. Update UI Lokal (Optimistic) - Reset unread count di list
+  const convIndex = conversations.value.findIndex(c => c.partnerId === partnerId)
+  if (convIndex !== -1) {
+    conversations.value[convIndex].unreadCount = 0
+  }
+
+  // 2. Panggil API Backend
+  try {
+    await $fetch('/api/chat/read', {
+      method: 'PUT',
+      body: { senderId: partnerId }
+    })
+  } catch (e) {
+    console.error("Gagal update status read", e)
+  }
+}
+
 // --- ACTIONS ---
 
-// 1. Trigger Modal Hapus
 const confirmDeleteMessage = (msg: any) => {
   msgToDelete.value = msg
   showDeleteConfirm.value = true
 }
 
-// 2. Eksekusi Hapus
 const handleDelete = async () => {
   if (!msgToDelete.value) return
 
   const msgId = msgToDelete.value.id
   const originalMessages = [...messages.value]
   
-  // Optimistic Update (Hapus dari UI dulu)
+  // Optimistic Update
   messages.value = messages.value.filter(m => m.id !== msgId)
-  
-  // Tutup modal
   showDeleteConfirm.value = false
   
   try {
     await $fetch(`/api/chat/${msgId}`, { method: 'DELETE' })
-    // Sukses, data di server sudah terhapus
   } catch (e) {
     console.error('Gagal menghapus pesan', e)
     toast.error(t('chat.delete_error') || 'Gagal menghapus pesan')
-    // Kembalikan pesan jika gagal
     messages.value = originalMessages
   } finally {
     msgToDelete.value = null
@@ -128,7 +146,15 @@ const handleDelete = async () => {
 }
 
 const openNewChat = () => { showContacts.value = true; fetchContacts() }
-const backToConversations = () => { showContacts.value = false; activeConversation.value = null }
+const backToConversations = () => { showContacts.value = false; activeConversation.value = null; fetchConversations() }
+
+// Wrapper untuk membuka percakapan dan menandai sebagai dibaca
+const handleSetConversation = (conv: any) => {
+  setConversation(conv)
+  markAsRead(conv.partnerId) // Tandai terbaca saat diklik
+  showContacts.value = false
+  fetchMessages().then(() => scrollToBottom(false))
+}
 
 const startChatWith = (contact: any) => {
   const conversationData = {
@@ -136,10 +162,9 @@ const startChatWith = (contact: any) => {
     name: contact.name,
     photo: contact.photo,
     role: contact.role,
+    unreadCount: 0 
   }
-  setConversation(conversationData)
-  showContacts.value = false
-  fetchMessages().then(() => scrollToBottom(false))
+  handleSetConversation(conversationData)
 }
 
 const sendMessage = async () => {
@@ -192,8 +217,14 @@ const isSameSender = (index: number) => {
 onMounted(() => {
   pollingInterval = setInterval(() => {
     if (isOpen.value) {
-      if (activeConversation.value) fetchMessages()
-      else fetchConversations()
+      if (activeConversation.value) {
+        fetchMessages()
+        markAsRead(activeConversation.value.partnerId) // Pastikan tetap terbaca saat chat terbuka
+      } else {
+        fetchConversations()
+      }
+    } else {
+      fetchConversations() // Update badge di luar
     }
   }, 3000)
 })
@@ -203,7 +234,10 @@ onUnmounted(() => { if (pollingInterval) clearInterval(pollingInterval) })
 watch(isOpen, (val) => {
   if (val) {
     fetchConversations()
-    if (activeConversation.value) fetchMessages().then(() => scrollToBottom(false))
+    if (activeConversation.value) {
+      fetchMessages().then(() => scrollToBottom(false))
+      markAsRead(activeConversation.value.partnerId)
+    }
   }
 })
 
@@ -346,7 +380,7 @@ watch(activeConversation, (val) => {
           </div>
           <ul v-else class="space-y-1">
             <li v-for="conv in conversations" :key="conv.partnerId">
-              <button @click="setConversation(conv)" class="w-full flex items-center gap-3 p-3 hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl transition text-left group relative">
+              <button @click="handleSetConversation(conv)" class="w-full flex items-center gap-3 p-3 hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl transition text-left group relative">
                 <div class="w-11 h-11 bg-gray-100 dark:bg-gray-700 rounded-full flex items-center justify-center text-gray-600 font-bold overflow-hidden border border-gray-200 dark:border-gray-700">
                   <img v-if="conv.photo" :src="conv.photo" class="w-full h-full object-cover" />
                   <span v-else>{{ conv.name[0] }}</span>
@@ -356,9 +390,14 @@ watch(activeConversation, (val) => {
                     <h4 class="font-bold text-gray-800 dark:text-gray-200 truncate text-sm group-hover:text-blue-600 transition-colors">{{ conv.name }}</h4>
                     <span class="text-[10px] text-gray-400">{{ new Date(conv.timestamp).toLocaleDateString() }}</span>
                   </div>
-                  <p class="text-xs text-gray-500 dark:text-gray-400 truncate pr-4">{{ conv.lastMessage }}</p>
+                  <p class="text-xs text-gray-500 dark:text-gray-400 truncate pr-4" :class="{'font-bold text-gray-800 dark:text-gray-200': conv.unreadCount > 0}">
+                    {{ conv.lastMessage }}
+                  </p>
                 </div>
-                <div v-if="conv.unreadCount > 0" class="absolute right-3 bottom-3 bg-red-500 text-white text-[10px] font-bold h-5 min-w-[1.25rem] px-1 rounded-full flex items-center justify-center shadow-sm">{{ conv.unreadCount }}</div>
+                
+                <div v-if="conv.unreadCount > 0" class="absolute right-3 bottom-3 bg-red-500 text-white text-[10px] font-bold h-5 min-w-[1.25rem] px-1 rounded-full flex items-center justify-center shadow-sm animate-pulse">
+                  {{ conv.unreadCount }}
+                </div>
               </button>
             </li>
           </ul>
@@ -389,6 +428,11 @@ watch(activeConversation, (val) => {
 
     <button @click="toggleChat" class="bg-blue-600 hover:bg-blue-700 text-white p-4 rounded-full shadow-[0_8px_30px_rgb(0,0,0,0.12)] transition-all duration-300 hover:scale-110 pointer-events-auto flex items-center justify-center group relative">
       <span v-if="!isOpen" class="absolute right-full mr-4 bg-gray-900 text-white text-xs px-3 py-1.5 rounded-lg opacity-0 group-hover:opacity-100 transition whitespace-nowrap shadow-xl font-medium">{{ $t('chat.chat_admin_tooltip') }}</span>
+      
+      <div v-if="totalUnread > 0 && !isOpen" class="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold h-5 min-w-[1.25rem] px-1 rounded-full flex items-center justify-center shadow-md border-2 border-white dark:border-gray-900 z-20 animate-bounce">
+        {{ totalUnread > 99 ? '99+' : totalUnread }}
+      </div>
+
       <svg v-if="!isOpen" class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
       <svg v-else class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
     </button>
