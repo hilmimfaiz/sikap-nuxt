@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { ref, watch, nextTick, computed, onMounted, onUnmounted } from 'vue'
 
+// Menggunakan composable suara
+const { playNotificationSound } = useSound()
+
 const { 
   isOpen, 
   toggleChat, 
@@ -66,10 +69,22 @@ const fetchMessages = async () => {
     const lastLocalMsg = messages.value[messages.value.length - 1]
     const lastServerMsg = data[data.length - 1]
 
+    // Cek perubahan data
     if (data.length !== messages.value.length || lastLocalMsg?.id !== lastServerMsg?.id) {
+      
       const isAtBottom = messagesContainer.value 
         ? (messagesContainer.value.scrollHeight - messagesContainer.value.scrollTop <= messagesContainer.value.clientHeight + 150)
         : true
+
+      // --- LOGIKA NOTIFIKASI SUARA ---
+      // Jika ada pesan baru dari server dan pengirimnya bukan user yang sedang login
+      if (lastServerMsg && lastServerMsg.senderId !== currentUser.id) {
+         // Cek apakah pesan benar-benar bertambah (menghindari bunyi saat re-fetch inisial)
+         if (data.length > messages.value.length) {
+            playNotificationSound()
+         }
+      }
+      // -------------------------------
 
       messages.value = data
       
